@@ -249,7 +249,6 @@ def feature_transformer_slice_backward(
         output_size
 ):
     def grid(meta):
-        print(meta['OUTPUT_BLOCK_SIZE'])
         return (
             batch_size,
             triton.cdiv(output_size, meta['OUTPUT_BLOCK_SIZE'])
@@ -847,6 +846,16 @@ if __name__ == "__main__":
         output1 = torch.clamp(output1, 0.0, 1.0)
         g = ((output0 - output1) ** 2).mean()
         g.backward()
+
+        for i in range(ITERS):
+            output0, output1 = layer(indices0, values0, indices1, values1)
+            output0 = torch.clamp(output0, 0.0, 1.0)
+            output1 = torch.clamp(output1, 0.0, 1.0)
+
+            g = ((output0 - output1) ** 2).mean()
+            g.backward()
+
+            torch.cuda.synchronize()
 
         device = indices0.device
 
