@@ -180,12 +180,15 @@ void feature_transformer_slice_forward(
 
 @triton.autotune(
     configs=[
-        triton.Config({
-            "OUTPUT_BLOCK_SIZE": O_SIZE,
-            "FEATURE_BLOCK_SIZE": F_SIZE
-        })
-        for O_SIZE in [8, 16, 32, 64, 128, 256, 512, 1024, 2048]
-        for F_SIZE in [8, 16, 32]
+        triton.Config({"OUTPUT_BLOCK_SIZE": 8}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 16}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 32}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 64}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 128}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 2048}),
     ],
     key=["max_active_features", "output_size"]
 )
@@ -198,8 +201,7 @@ def _feature_transformer_slice_backward_kernel(
         output_grad,
         max_active_features: tl.constexpr,
         output_size: tl.constexpr,
-        OUTPUT_BLOCK_SIZE: tl.constexpr,
-        FEATURE_BLOCK_SIZE: tl.constexpr
+        OUTPUT_BLOCK_SIZE: tl.constexpr
 ):
     batch_idx = tl.program_id(0)
     output_block_idx = tl.program_id(1)
@@ -221,25 +223,20 @@ def _feature_transformer_slice_backward_kernel(
     )
 
     past_active_features = False
-    for k_start in range(0, max_active_features, FEATURE_BLOCK_SIZE):
+    for k in range(max_active_features):
         if not past_active_features:
-            k_offsets = k_start + tl.arange(0, FEATURE_BLOCK_SIZE)
-            k_mask = k_offsets < max_active_features
-            feature_idx_block = tl.load(feature_indices_slice + k_offsets, mask=k_mask)
-            feature_val_block = tl.load(feature_values_slice + k_offsets, mask=k_mask)
-            for k in range(FEATURE_BLOCK_SIZE):
-                if not past_active_features:
-                    curr_feature_idx = tl.load(feature_idx_block + k)
-                    curr_feature_val = tl.load(feature_val_block + k)
-                    if curr_feature_idx == -1:
-                        past_active_features = True
-                    else:
-                        curr_weight_grad_values = output_grad_values * curr_feature_val
-                        tl.atomic_add(
-                            weight_grad + curr_feature_idx * output_size + output_offsets,
-                            curr_weight_grad_values,
-                            mask=nonzero_grad_mask
-                        )
+            feature_idx = tl.load(feature_indices_slice + k)
+            if feature_idx == -1:
+                past_active_features = True
+            else:
+                curr_feature_values = tl.load(feature_values_slice + k)
+                curr_weight_grad_values = output_grad_values * curr_feature_values
+                nnz = nonzero_grad_mask & (curr_weight_grad_values != 0.0)
+                tl.atomic_add(
+                    weight_grad + feature_idx * output_size + output_offsets,
+                    curr_weight_grad_values,
+                    mask=nnz
+                )
 
 
 def feature_transformer_slice_backward(
