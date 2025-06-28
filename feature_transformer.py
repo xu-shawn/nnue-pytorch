@@ -214,7 +214,7 @@ def _feature_transformer_slice_backward_kernel(
 
     output_grad_slice = output_grad + batch_idx * output_size
     output_grad_values = tl.load(output_grad_slice + output_offsets, mask=output_mask, other=0.0)
-    nonzero_grad_mask = output_mask & (output_grad_values != 0)
+    nonzero_grad_mask = output_mask & (output_grad_values != 0.0)
 
     tl.atomic_add(
         bias_grad + output_offsets,
@@ -231,10 +231,11 @@ def _feature_transformer_slice_backward_kernel(
             else:
                 curr_feature_values = tl.load(feature_values_slice + k)
                 curr_weight_grad_values = output_grad_values * curr_feature_values
+                nnz = nonzero_grad_mask & (curr_weight_grad_values != 0.0)
                 tl.atomic_add(
                     weight_grad + feature_idx * output_size + output_offsets,
                     curr_weight_grad_values,
-                    mask=nonzero_grad_mask
+                    mask=nnz
                 )
 
 
