@@ -249,6 +249,7 @@ def feature_transformer_slice_backward(
         output_size
 ):
     def grid(meta):
+        print(meta['OUTPUT_BLOCK_SIZE'])
         return (
             batch_size,
             triton.cdiv(output_size, meta['OUTPUT_BLOCK_SIZE'])
