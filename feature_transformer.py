@@ -188,6 +188,7 @@ void feature_transformer_slice_forward(
         triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 2048}),
     ],
     key=["max_active_features", "output_size"]
 )
