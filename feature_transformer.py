@@ -180,9 +180,14 @@ void feature_transformer_slice_forward(
 
 @triton.autotune(
     configs=[
-        triton.Config({"OUTPUT_BLOCK_SIZE": O_SIZE, "num_warps": N_WARPS})
-        for O_SIZE in [8, 16, 32, 64, 128, 256, 512, 1024]
-        for N_WARPS in [4, 8]
+        triton.Config({"OUTPUT_BLOCK_SIZE": 8}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 16}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 32}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 64}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 128}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
     ],
     key=["max_active_features", "output_size"]
 )
