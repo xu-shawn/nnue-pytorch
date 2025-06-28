@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 from torch import autograd
+import triton
+import triton.language as tl
 import cupy as cp
 import math
 
@@ -45,6 +47,80 @@ def _kernel_with_threads(kernel, threads):
         kernel(grid=grid, block=threads, args=args)
 
     return f
+
+
+@triton.autotune(
+    configs=[
+        triton.Config({"OUTPUT_BLOCK_SIZE": 32}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 64}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 128}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 2048}),
+    ],
+    key=["max_active_features", "output_size"]
+)
+@triton.jit
+def _feature_transformer_slice_forward_kernel(
+        feature_indices,
+        feature_values,
+        weight,
+        bias,
+        output,
+        max_active_features: tl.constexpr,
+        output_size: tl.constexpr,
+        OUTPUT_BLOCK_SIZE: tl.constexpr
+):
+    batch_idx = tl.program_id(0)
+    output_block_idx = tl.program_id(1)
+
+    output_offsets = OUTPUT_BLOCK_SIZE * output_block_idx + tl.arange(0, OUTPUT_BLOCK_SIZE)
+    output_mask = output_offsets < output_size
+
+    feature_indices_slice = feature_indices + batch_idx * max_active_features
+    feature_values_slice = feature_values + batch_idx * max_active_features
+    output_slice = output + batch_idx * output_size
+
+    acc = tl.load(bias + output_offsets, mask=output_mask, other=0.0)
+    acc = acc.to(tl.float32)
+
+    past_active_features = False
+    for k in range(max_active_features):
+        if not past_active_features:
+            feature_idx = tl.load(feature_indices_slice + k)
+            if feature_idx == -1:
+                past_active_features = True
+            else:
+                curr_feature_values = tl.load(feature_values_slice + k)
+                curr_weight_values = tl.load(weight + feature_idx * output_size + output_offsets, mask=output_mask, other=0.0)
+                acc += curr_weight_values * curr_feature_values
+
+    tl.store(output_slice + output_offsets, acc, mask=output_mask)
+
+
+def feature_transformer_slice_forward(
+        feature_indices,
+        feature_values,
+        weight,
+        bias,
+        output,
+        batch_size,
+        max_active_features,
+        output_size
+):
+    def grid(meta):
+        return (batch_size, triton.cdiv(output_size, meta["OUTPUT_BLOCK_SIZE"]))
+
+    _feature_transformer_slice_forward_kernel[grid](
+        feature_indices=feature_indices,
+        feature_values=feature_values,
+        weight=weight,
+        bias=bias,
+        output=output,
+        max_active_features=max_active_features,
+        output_size=output_size,
+    )
 
 
 _feature_transformer_slice_forward_kernel_cache = dict()
@@ -359,18 +435,15 @@ class FeatureTransformerSliceFunction(autograd.Function):
             requires_grad=True,
         )
 
-        kernel = make_feature_transformer_slice_forward_kernel(
-            max_active_features, output_size
-        )
-        kernel(
-            grid=(batch_size,),
-            args=(
-                feature_indices.data_ptr(),
-                feature_values.data_ptr(),
-                weight.data_ptr(),
-                bias.data_ptr(),
-                output.data_ptr(),
-            ),
+        feature_transformer_slice_forward(
+            feature_indices=feature_indices,
+            feature_values=feature_values,
+            weight=weight,
+            bias=bias,
+            output=output,
+            batch_size=batch_size,
+            max_active_features=max_active_features,
+            output_size=output_size
         )
 
         return output
@@ -476,14 +549,14 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
         max_active_features = feature_indices_0.shape[1]
         output_size = weight.shape[1]
 
-        output0 = torch.empty(
+        output_0 = torch.empty(
             batch_size,
             output_size,
             dtype=torch.float32,
             device=device,
             requires_grad=True,
         )
-        output1 = torch.empty(
+        output_1 = torch.empty(
             batch_size,
             output_size,
             dtype=torch.float32,
@@ -491,32 +564,28 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
             requires_grad=True,
         )
 
-        kernel = make_feature_transformer_slice_forward_kernel(
-            max_active_features, output_size
+        feature_transformer_slice_forward(
+            feature_indices=feature_indices_0,
+            feature_values=feature_values_0,
+            weight=weight,
+            bias=bias,
+            output=output_0,
+            batch_size=batch_size,
+            max_active_features=max_active_features,
+            output_size=output_size
         )
-        kernel(
-            grid=(batch_size,),
-            args=(
-                feature_indices_0.data_ptr(),
-                feature_values_0.data_ptr(),
-                weight.data_ptr(),
-                bias.data_ptr(),
-                output0.data_ptr(),
-            ),
-        )
-
-        kernel(
-            grid=(batch_size,),
-            args=(
-                feature_indices_1.data_ptr(),
-                feature_values_1.data_ptr(),
-                weight.data_ptr(),
-                bias.data_ptr(),
-                output1.data_ptr(),
-            ),
+        feature_transformer_slice_forward(
+            feature_indices=feature_indices_1,
+            feature_values=feature_values_1,
+            weight=weight,
+            bias=bias,
+            output=output_1,
+            batch_size=batch_size,
+            max_active_features=max_active_features,
+            output_size=output_size
         )
 
-        return output0, output1
+        return output_0, output_1
 
     @staticmethod
     def backward(ctx, grad_output_0, grad_output_1):
