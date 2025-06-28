@@ -255,9 +255,7 @@ def feature_transformer_slice_backward(
             triton.cdiv(output_size, meta['OUTPUT_BLOCK_SIZE'])
         )
 
-    x = _feature_transformer_slice_backward_kernel[grid]
-    print(x.asm["ttgir"])
-    x(
+    compiled_kernel = _feature_transformer_slice_backward_kernel[grid](
         feature_indices=feature_indices,
         feature_values=feature_values,
         weight_grad=weight_grad,
@@ -266,6 +264,8 @@ def feature_transformer_slice_backward(
         max_active_features=max_active_features,
         output_size=output_size
     )
+
+    print(compiled_kernel.asm["ttgir"])
 
 
 _feature_transformer_slice_backward_kernel_cache = dict()
