@@ -806,7 +806,7 @@ if __name__ == "__main__":
         INPUT_SIZE = 40960
         BATCH_SIZE = 8192
         ITERS = 64
-        STRIDE = 264
+        STRIDE = 4074
         MAX_ACTIVE_FEATURES = 64
 
         layer = DoubleFeatureTransformerSlice(INPUT_SIZE, STRIDE).cuda()
