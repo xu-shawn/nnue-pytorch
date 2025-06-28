@@ -180,51 +180,22 @@ void feature_transformer_slice_forward(
 
 @triton.autotune(
     configs=[
+        triton.Config({"OUTPUT_BLOCK_SIZE": 8}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 16}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 32}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 64}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 128}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
     ],
-    key=["batch_size", "output_size"]
-)
-@triton.jit
-def _feature_transformer_slice_bias_backward_kernel(
-        bias_grad,
-        output_grad,
-        batch_size: tl.constexpr,
-        output_size: tl.constexpr,
-        OUTPUT_BLOCK_SIZE: tl.constexpr
-):
-    output_block_idx = tl.program_id(0)
-
-    output_offsets = OUTPUT_BLOCK_SIZE * output_block_idx + tl.arange(0, OUTPUT_BLOCK_SIZE)
-    output_mask = output_offsets < output_size
-
-    acc = tl.zeros((OUTPUT_BLOCK_SIZE,), dtype=tl.float32)
-
-    for k in range(batch_size):
-        output_grad_slice = output_grad + k * output_size
-        output_grad_values = tl.load(output_grad_slice + output_offsets, mask=output_mask, other=0.0)
-        acc += output_grad_values
-
-    bias_update_mask = output_mask & (acc != 0.0)
-    tl.atomic_add(bias_grad + output_offsets, acc, mask=bias_update_mask)
-
-
-@triton.autotune(
-    configs=[
-        triton.Config({"OUTPUT_BLOCK_SIZE": 32}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 64}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 128}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
-    ],
     key=["max_active_features", "output_size"]
 )
 @triton.jit
-def _feature_transformer_slice_weight_backward_kernel(
+def _feature_transformer_slice_backward_kernel(
         feature_indices,
         feature_values,
+        bias_grad,
         weight_grad,
         output_grad,
         max_active_features: tl.constexpr,
@@ -242,6 +213,13 @@ def _feature_transformer_slice_weight_backward_kernel(
 
     output_grad_slice = output_grad + batch_idx * output_size
     output_grad_values = tl.load(output_grad_slice + output_offsets, mask=output_mask, other=0.0)
+    nonzero_grad_mask = output_mask & (output_grad_values != 0)
+
+    tl.atomic_add(
+        bias_grad + output_offsets,
+        output_grad_values,
+        mask=nonzero_grad_mask
+    )
 
     past_active_features = False
     for k in range(max_active_features):
@@ -252,11 +230,10 @@ def _feature_transformer_slice_weight_backward_kernel(
             else:
                 curr_feature_values = tl.load(feature_values_slice + k)
                 curr_weight_grad_values = output_grad_values * curr_feature_values
-                curr_weight_update_mask = output_mask & (curr_weight_grad_values != 0)
                 tl.atomic_add(
                     weight_grad + feature_idx * output_size + output_offsets,
                     curr_weight_grad_values,
-                    mask=curr_weight_update_mask
+                    mask=nonzero_grad_mask
                 )
 
 
@@ -270,26 +247,17 @@ def feature_transformer_slice_backward(
         max_active_features,
         output_size
 ):
-    def grid_bias(meta):
-        return (triton.cdiv(output_size, meta['OUTPUT_BLOCK_SIZE']),)
-
-    _feature_transformer_slice_bias_backward_kernel[grid_bias](
-        bias_grad=bias_grad,
-        output_grad=output_grad,
-        batch_size=batch_size,
-        output_size=output_size
-    )
-
-    def grid_weights(meta):
+    def grid(meta):
         return (
             batch_size,
             triton.cdiv(output_size, meta['OUTPUT_BLOCK_SIZE'])
         )
 
-    _feature_transformer_slice_weight_backward_kernel[grid_weights](
+    _feature_transformer_slice_backward_kernel[grid](
         feature_indices=feature_indices,
         feature_values=feature_values,
         weight_grad=weight_grad,
+        bias_grad=bias_grad,
         output_grad=output_grad,
         max_active_features=max_active_features,
         output_size=output_size
@@ -848,6 +816,10 @@ if __name__ == "__main__":
         ).cuda()
 
         output0, output1 = layer(indices0, values0, indices1, values1)
+        output0 = torch.clamp(output0, 0.0, 1.0)
+        output1 = torch.clamp(output1, 0.0, 1.0)
+        g = ((output0 - output1) ** 2).mean()
+        g.backward()
 
         device = indices0.device
 
