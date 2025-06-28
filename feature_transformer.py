@@ -630,26 +630,51 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
         )
         bias_grad = torch.zeros(output_size, dtype=torch.float32, device=device)
 
-        feature_transformer_slice_backward(
-            feature_indices=feature_indices_0,
-            feature_values=feature_values_0,
-            weight_grad=weight_grad,
-            bias_grad=bias_grad,
-            output_grad=grad_output_0,
-            batch_size=batch_size,
-            max_active_features=max_active_features,
-            output_size=output_size,
+        kernel = make_feature_transformer_slice_backward_kernel(
+            max_active_features, output_size
         )
-        feature_transformer_slice_backward(
-            feature_indices=feature_indices_1,
-            feature_values=feature_values_1,
-            weight_grad=weight_grad,
-            bias_grad=bias_grad,
-            output_grad=grad_output_1,
-            batch_size=batch_size,
-            max_active_features=max_active_features,
-            output_size=output_size,
+
+        kernel(
+            grid=(batch_size,),
+            args=(
+                feature_indices_0.data_ptr(),
+                feature_values_0.data_ptr(),
+                weight_grad.data_ptr(),
+                bias_grad.data_ptr(),
+                grad_output_0.data_ptr(),
+            ),
         )
+        kernel(
+            grid=(batch_size,),
+            args=(
+                feature_indices_1.data_ptr(),
+                feature_values_1.data_ptr(),
+                weight_grad.data_ptr(),
+                bias_grad.data_ptr(),
+                grad_output_1.data_ptr(),
+            ),
+        )
+
+        # feature_transformer_slice_backward(
+        #     feature_indices=feature_indices_0,
+        #     feature_values=feature_values_0,
+        #     weight_grad=weight_grad,
+        #     bias_grad=bias_grad,
+        #     output_grad=grad_output_0,
+        #     batch_size=batch_size,
+        #     max_active_features=max_active_features,
+        #     output_size=output_size,
+        # )
+        # feature_transformer_slice_backward(
+        #     feature_indices=feature_indices_1,
+        #     feature_values=feature_values_1,
+        #     weight_grad=weight_grad,
+        #     bias_grad=bias_grad,
+        #     output_grad=grad_output_1,
+        #     batch_size=batch_size,
+        #     max_active_features=max_active_features,
+        #     output_size=output_size,
+        # )
 
         return None, None, None, None, weight_grad, bias_grad
 
