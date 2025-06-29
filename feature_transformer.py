@@ -265,7 +265,8 @@ def feature_transformer_slice_backward(
         output_size=output_size
     )
 
-    print(compiled_kernel.asm["ttgir"])
+    with open("output", "w") as f:
+        print(compiled_kernel.asm["ttgir"], file=f)
 
 
 _feature_transformer_slice_backward_kernel_cache = dict()
