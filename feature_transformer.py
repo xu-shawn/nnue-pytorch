@@ -221,22 +221,16 @@ def _feature_transformer_slice_backward_kernel(
         mask=nonzero_grad_mask
     )
 
-    k = 0
-    feature_idx = tl.load(feature_indices_slice + k)
-    while (
-        k < max_active_features and
-        feature_idx != -1
-    ):
-        curr_feature_values = tl.load(feature_values_slice + k)
-        curr_weight_grad_values = output_grad_values * curr_feature_values
-        tl.atomic_add(
-            weight_grad + feature_idx * output_size + output_offsets,
-            curr_weight_grad_values,
-            mask=nonzero_grad_mask
-        )
-        k += 1
-        if k < max_active_features:
-            feature_idx = tl.load(feature_indices_slice + k)
+    for k in range(max_active_features):
+        feature_idx = tl.load(feature_indices_slice + k)
+        if feature_idx != -1:
+            curr_feature_values = tl.load(feature_values_slice + k)
+            curr_weight_grad_values = output_grad_values * curr_feature_values
+            tl.atomic_add(
+                weight_grad + feature_idx * output_size + output_offsets,
+                curr_weight_grad_values,
+                mask=nonzero_grad_mask
+            )
 
 
 def feature_transformer_slice_backward(
