@@ -3,6 +3,9 @@ import torch
 import triton
 import triton.language as tl
 
+from triton.experimental import gluon
+from triton.experimental.gluon import language as gl
+
 from torch import nn
 from torch import autograd
 
@@ -94,28 +97,28 @@ def feature_transformer_slice_forward(
     ],
     key=["max_active_features", "output_size"]
 )
-@triton.jit
+@gluon.jit
 def _feature_transformer_slice_backward_kernel(
         feature_indices,
         feature_values,
         bias_grad,
         weight_grad,
         output_grad,
-        max_active_features: tl.constexpr,
-        output_size: tl.constexpr,
-        OUTPUT_BLOCK_SIZE: tl.constexpr
+        max_active_features: gl.constexpr,
+        output_size: gl.constexpr,
+        OUTPUT_BLOCK_SIZE: gl.constexpr
 ):
-    batch_idx = tl.program_id(0)
-    output_block_idx = tl.program_id(1)
+    batch_idx = gl.program_id(0)
+    output_block_idx = gl.program_id(1)
 
-    output_offsets = OUTPUT_BLOCK_SIZE * output_block_idx + tl.arange(0, OUTPUT_BLOCK_SIZE)
+    output_offsets = OUTPUT_BLOCK_SIZE * output_block_idx + gl.arange(0, OUTPUT_BLOCK_SIZE)
     output_mask = output_offsets < output_size
 
     feature_indices_slice = feature_indices + batch_idx * max_active_features
     feature_values_slice = feature_values + batch_idx * max_active_features
 
     output_grad_slice = output_grad + batch_idx * output_size
-    output_grad_values = tl.load(output_grad_slice + output_offsets, mask=output_mask, other=0.0)
+    output_grad_values = gl.load(output_grad_slice + output_offsets, mask=output_mask, other=0.0)
     nonzero_grad_mask = output_mask & (output_grad_values != 0)
 
     tl.atomic_add(
@@ -127,13 +130,13 @@ def _feature_transformer_slice_backward_kernel(
     past_active_features = False
     k = 0
     while k < max_active_features and not past_active_features:
-        feature_idx = tl.load(feature_indices_slice + k)
+        feature_idx = gl.load(feature_indices_slice + k)
         if feature_idx == -1:
             past_active_features = True
         else:
-            curr_feature_values = tl.load(feature_values_slice + k)
+            curr_feature_values = gl.load(feature_values_slice + k)
             curr_weight_grad_values = output_grad_values * curr_feature_values
-            tl.atomic_add(
+            gl.atomic_add(
                 weight_grad + feature_idx * output_size + output_offsets,
                 curr_weight_grad_values,
                 mask=nonzero_grad_mask
