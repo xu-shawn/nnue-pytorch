@@ -86,8 +86,8 @@ def make_data_loaders(
         batch_size=None,
         batch_sampler=None,
     )
-    pickle.dump(train, "/tmp/train_dump")
-    pickle.dump(val, "/tmp/val_dump")
+    pickle.dumps(train)
+    pickle.dumps(val)
     return train, val
 
 
