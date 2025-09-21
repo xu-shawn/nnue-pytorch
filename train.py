@@ -72,22 +72,26 @@ def make_data_loaders(
     )
     # num_workers has to be 0 for sparse, and 1 for dense
     # it currently cannot work in parallel mode but it shouldn't need to
+    fixed_dataset_train = data_loader.FixedNumBatchesDataset(
+        train_infinite, (epoch_size + batch_size - 1) // batch_size
+    )
     train = DataLoader(
-        data_loader.FixedNumBatchesDataset(
-            train_infinite, (epoch_size + batch_size - 1) // batch_size
-        ),
+        fixed_dataset_train,
         batch_size=None,
         batch_sampler=None,
+    )
+    fixed_dataset_val = data_loader.FixedNumBatchesDataset(
+        train_infinite, (epoch_size + batch_size - 1) // batch_size
     )
     val = DataLoader(
-        data_loader.FixedNumBatchesDataset(
-            val_infinite, (val_size + batch_size - 1) // batch_size
-        ),
+        fixed_dataset_val,
         batch_size=None,
         batch_sampler=None,
     )
-    pickle.dumps(train)
-    pickle.dumps(val)
+    pickle.dumps(train_infinite)
+    pickle.dumps(val_infinite)
+    pickle.dumps(fixed_dataset_train)
+    pickle.dumps(fixed_dataset_val)
     return train, val
 
 
