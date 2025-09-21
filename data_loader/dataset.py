@@ -174,14 +174,37 @@ class FixedNumBatchesDataset(Dataset):
     def __init__(self, dataset, num_batches):
         super(FixedNumBatchesDataset, self).__init__()
         self.dataset = dataset
-        self.iter = iter(self.dataset)
         self.num_batches = num_batches
+        # Defer initialization of runtime state
+        self._initialize_runtime_state()
 
+    def _initialize_runtime_state(self):
+        """Initializes non-pickleable attributes."""
+        self.iter = iter(self.dataset)
         self._prefetch_queue = queue.Queue(maxsize=100)
         self._prefetch_thread = None
         self._stop_prefetching = threading.Event()
         self._prefetch_started = False
-        self._lock = None
+        self._lock = threading.Lock()
+
+    def __getstate__(self):
+        """
+        Return the state to be pickled.
+        We only save the configuration, not the runtime state.
+        """
+        return {
+            'dataset': self.dataset,
+            'num_batches': self.num_batches,
+        }
+
+    def __setstate__(self, state):
+        """
+        Restore the state from the pickled representation.
+        We restore the configuration and re-initialize the runtime state.
+        """
+        self.dataset = state['dataset']
+        self.num_batches = state['num_batches']
+        self._initialize_runtime_state()
 
     def _prefetch_worker(self):
         try:
@@ -198,9 +221,6 @@ class FixedNumBatchesDataset(Dataset):
             self._prefetch_queue.put(e)
 
     def _start_prefetching(self):
-        if self._lock is None:
-            self._lock = threading.Lock()
-
         with self._lock:
             if not self._prefetch_started:
                 self._prefetch_thread = threading.Thread(
