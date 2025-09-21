@@ -452,7 +452,7 @@ def main():
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
         accelerator="gpu",
-        devices=2,
+        devices=1,
         # devices=[int(x) for x in args.gpus.rstrip(",").split(",") if x]
         # if args.gpus
         # else "auto",
