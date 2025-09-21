@@ -52,6 +52,7 @@ def make_data_loaders(
     epoch_size,
     val_size,
 ):
+    import pickle
     # Epoch and validation sizes are arbitrary
     features_name = feature_set.name
     train_infinite = data_loader.SparseBatchDataset(
@@ -85,6 +86,8 @@ def make_data_loaders(
         batch_size=None,
         batch_sampler=None,
     )
+    pickle.dump(train)
+    pickle.dump(val)
     return train, val
 
 
