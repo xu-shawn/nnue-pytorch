@@ -451,9 +451,10 @@ def main():
     trainer = pl.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
-        devices=[int(x) for x in args.gpus.rstrip(",").split(",") if x]
-        if args.gpus
-        else "auto",
+        devices=2,
+        # devices=[int(x) for x in args.gpus.rstrip(",").split(",") if x]
+        # if args.gpus
+        # else "auto",
         logger=tb_logger,
         callbacks=[
             checkpoint_callback,
