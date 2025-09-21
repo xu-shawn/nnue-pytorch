@@ -8,7 +8,7 @@ import sys
 import torch
 from torch import set_num_threads as t_set_num_threads
 from lightning.pytorch import loggers as pl_loggers
-from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoint
+from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoint, StochasticWeightAveraging
 from torch.utils.data import DataLoader
 import time
 from datetime import timedelta
@@ -458,6 +458,7 @@ def main():
             checkpoint_callback,
             TQDMProgressBar(refresh_rate=300),
             TimeLimitAfterCheckpoint(args.max_time),
+            StochasticWeightAveraging(swa_lrs=1e-2),
         ],
         enable_progress_bar=True,
         enable_checkpointing=True,

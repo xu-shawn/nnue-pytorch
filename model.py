@@ -11,7 +11,7 @@ from features.feature_set import FeatureSet
 from typing import List, Tuple
 
 # 3 layer fully connected network
-L1 = 3072
+L1 = 16
 L2 = 15
 L3 = 32
 
