@@ -181,7 +181,7 @@ class FixedNumBatchesDataset(Dataset):
         self._prefetch_thread = None
         self._stop_prefetching = threading.Event()
         self._prefetch_started = False
-        self._lock = threading.Lock()
+        self._lock = None
 
     def _prefetch_worker(self):
         try:
@@ -198,6 +198,9 @@ class FixedNumBatchesDataset(Dataset):
             self._prefetch_queue.put(e)
 
     def _start_prefetching(self):
+        if self._lock is None:
+            self._lock = threading.Lock()
+
         with self._lock:
             if not self._prefetch_started:
                 self._prefetch_thread = threading.Thread(
