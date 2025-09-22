@@ -468,8 +468,8 @@ class NNUE(L.LightningModule):
 
     #     create_fixed_offset(self.model, self.batch_size)
 
-    #     if self.compilation_mode is not None:
-    #         self.model.compile(backend=self.compilation_mode)
+        if self.compilation_mode is not None:
+            self.model.compile(backend=self.compilation_mode)
 
     def configure_optimizers(self):
         LR = self.lr

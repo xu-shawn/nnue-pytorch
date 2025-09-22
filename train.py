@@ -474,7 +474,6 @@ def main():
     )
 
     nnue.model = get_model_with_fixed_offset(nnue.model, batch_size, main_device)
-    nnue = torch.compile(nnue, backend=args.compile_backend)
 
     print("Using C++ data loader")
     train, val = make_data_loaders(
