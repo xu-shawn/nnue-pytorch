@@ -255,12 +255,12 @@ class NNUEModel(nn.Module):
                                 - expanded_virtual_layer
                             )
                             p_data_fp32 = torch.min(p_data_fp32, max_weight_t)
+                        p.data = p_data_fp32
                     else:
                         if min_weight is not None and max_weight is not None:
-                            p_data_fp32.clamp_(min_weight, max_weight)
+                            p.data = torch.clamp(p_data_fp32, min=min_weight, max=max_weight)
                         else:
                             raise Exception("Not supported.")
-                    p.data.copy_(p_data_fp32)
 
     def set_feature_set(self, new_feature_set: FeatureSet):
         """
