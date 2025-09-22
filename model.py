@@ -80,8 +80,8 @@ class LayerStacks(nn.Module):
     def forward(self, x: Tensor, ls_indices: Tensor):
         idx_offset = torch.arange(
             0,
-            x.shape[0] * self.layer_stack.count,
-            self.layer_stack.count,
+            x.shape[0] * self.count,
+            self.count,
             device=x.device
         )
 
