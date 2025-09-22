@@ -481,12 +481,6 @@ def main():
     else:
         trainer.fit(nnue, train, val)
 
-    with open("triton_kernel.ptx", "w") as a:
-        print(feature_transformer._feature_transformer_slice_backward_kernel.function.asm["ptx"], file=a)
-
-    with open(os.path.join(logdir, "training_finished"), "w"):
-        pass
-
 
 if __name__ == "__main__":
     main()
