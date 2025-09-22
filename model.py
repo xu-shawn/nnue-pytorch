@@ -514,7 +514,7 @@ def get_parameters(layers: list[nn.Module]):
 def create_fixed_offset(model, batch_size):
     idx_offset = torch.arange(
         0,
-        batch_size * model.layer_stacks.count,
-        model.layer_stacks.count,
+        batch_size * model.count,
+        model.count,
     )
-    model.layer_stacks.register_buffer("idx_offset", idx_offset)
+    model.register_buffer("idx_offset", idx_offset)
