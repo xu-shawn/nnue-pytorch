@@ -482,7 +482,7 @@ def main():
         trainer.fit(nnue, train, val)
 
     with open("triton_kernel.ptx", "w") as a:
-        print(feature_transformer._feature_transformer_slice_backward_kernel.asm["ptx"], file=a)
+        print(feature_transformer._feature_transformer_slice_backward_kernel.function.asm["ptx"], file=a)
 
     with open(os.path.join(logdir, "training_finished"), "w"):
         pass
