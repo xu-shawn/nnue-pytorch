@@ -458,22 +458,7 @@ def main():
         benchmark=True,
     )
 
-    def get_model_with_fixed_offset(model, batch_size, main_device):
-        model.layer_stacks.idx_offset = torch.arange(
-            0,
-            batch_size * model.layer_stacks.count,
-            model.layer_stacks.count,
-            device=main_device,
-        )
-        return model
-
-    main_device = (
-        trainer.strategy.root_device
-        if trainer.strategy.root_device.index is None
-        else "cuda:" + str(trainer.strategy.root_device.index)
-    )
-
-    nnue.model = get_model_with_fixed_offset(nnue.model, batch_size, main_device)
+    M.create_fixed_offset(nnue.model.layer_stacks, batch_size)
     nnue = torch.compile(nnue, backend=args.compile_backend)
 
     print("Using C++ data loader")
