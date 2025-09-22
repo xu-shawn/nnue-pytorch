@@ -157,9 +157,7 @@ def feature_transformer_slice_backward(
             triton.cdiv(output_size, meta['OUTPUT_BLOCK_SIZE'])
         )
 
-    f_bwd = _feature_transformer_slice_backward_kernel[grid]
-
-    f_bwd(
+    kernel = _feature_transformer_slice_backward_kernel[grid](
         feature_indices=feature_indices,
         feature_values=feature_values,
         weight_grad=weight_grad,
@@ -169,10 +167,9 @@ def feature_transformer_slice_backward(
         output_size=output_size
     )
 
-    print(_feature_transformer_slice_backward_kernel.fn.__dict__)
+    print(kernel.asm)
     # with open("triton_kernel.ptx", "w") as a:
     #     print(f_bwd.asm["ptx"], file=a)
-
 
 
 class FeatureTransformerSliceFunction(autograd.Function):
