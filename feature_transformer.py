@@ -155,7 +155,7 @@ def feature_transformer_slice_backward(
         OUTPUT_BLOCK_SIZE=1024
     )
 
-    print(kernel.asm.keys())
+    print(kernel.__dict__)
     # with open("triton_kernel.ptx", "w") as a:
     #     print(f_bwd.asm["ptx"], file=a)
 
