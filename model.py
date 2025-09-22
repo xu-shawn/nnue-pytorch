@@ -152,6 +152,8 @@ class NNUEModel(nn.Module):
         self.feature_set = feature_set
         self.layer_stacks = LayerStacks(self.num_ls_buckets)
 
+        self.nnue2score = 600.0
+
         self._init_layers()
 
     def _init_layers(self):
