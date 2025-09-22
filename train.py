@@ -3,6 +3,7 @@ import model as M
 import data_loader
 import lightning as L
 import features
+import feature_transformer
 import os
 import sys
 import torch
@@ -453,6 +454,14 @@ def main():
         enable_checkpointing=True,
         benchmark=True,
     )
+
+    cache = feature_transformer._feature_transformer_slice_backward_kernel.cache
+    cache_entry = cache[0]
+    compiled_kernel = list(cache_entry.values())[0]
+    asm_dict = compiled_kernel.asm
+    with open("triton_kernel.ptx", "w") as a:
+        print(asm_dict['ptx'], file=a)
+
 
     nnue = torch.compile(nnue, backend=args.compile_backend)
 

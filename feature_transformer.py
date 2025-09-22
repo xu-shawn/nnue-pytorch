@@ -410,13 +410,6 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
             output_size=output_size,
         )
 
-        cache = _feature_transformer_slice_backward_kernel.cache
-        cache_entry = cache[0]
-        compiled_kernel = list(cache_entry.values())[0]
-        asm_dict = compiled_kernel.asm
-        with open("triton_kernel.ptx", "w") as a:
-            print(asm_dict['ptx'], file=a)
-
         return None, None, None, None, weight_grad, bias_grad
 
 
