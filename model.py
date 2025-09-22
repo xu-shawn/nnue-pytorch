@@ -457,19 +457,19 @@ class NNUE(L.LightningModule):
     def test_step(self, batch, batch_idx):
         self.step_(batch, batch_idx, "test_loss")
 
-    def configure_model(self):
-        def create_fixed_offset(model, batch_size):
-            idx_offset = torch.arange(
-                0,
-                batch_size * model.layer_stacks.count,
-                model.layer_stacks.count,
-            )
-            model.layer_stacks.register_buffer("idx_offset", idx_offset)
+    # def configure_model(self):
+    #     def create_fixed_offset(model, batch_size):
+    #         idx_offset = torch.arange(
+    #             0,
+    #             batch_size * model.layer_stacks.count,
+    #             model.layer_stacks.count,
+    #         )
+    #         model.layer_stacks.register_buffer("idx_offset", idx_offset)
 
-        create_fixed_offset(self.model, self.batch_size)
+    #     create_fixed_offset(self.model, self.batch_size)
 
-        if self.compilation_mode is not None:
-            self.model.compile(backend=self.compilation_mode)
+    #     if self.compilation_mode is not None:
+    #         self.model.compile(backend=self.compilation_mode)
 
     def configure_optimizers(self):
         LR = self.lr
