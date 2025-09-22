@@ -458,7 +458,6 @@ def main():
         benchmark=True,
     )
 
-    M.create_fixed_offset(nnue.model.layer_stacks, batch_size)
     nnue = torch.compile(nnue, backend=args.compile_backend)
 
     print("Using C++ data loader")

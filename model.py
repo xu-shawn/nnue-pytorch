@@ -78,13 +78,14 @@ class LayerStacks(nn.Module):
         self.output.bias = nn.Parameter(output_bias)
 
     def forward(self, x: Tensor, ls_indices: Tensor):
-        assert (
-            hasattr(self, "idx_offset")
-            and self.idx_offset is not None
-            and self.idx_offset.shape[0] == x.shape[0]
+        idx_offset = torch.arange(
+            0,
+            x.shape[0] * self.layer_stack.count,
+            self.layer_stack.count,
+            device=x.device
         )
 
-        indices = ls_indices.flatten() + self.idx_offset
+        indices = ls_indices.flatten() + idx_offset
 
         l1s_ = self.l1(x).reshape((-1, self.count, L2 + 1))
         l1f_ = self.l1_fact(x)
@@ -509,12 +510,3 @@ def coalesce_ft_weights(model: NNUEModel, layer: BaseFeatureTransformerSlice):
 
 def get_parameters(layers: list[nn.Module]):
     return [p for layer in layers for p in layer.parameters()]
-
-
-def create_fixed_offset(model, batch_size):
-    idx_offset = torch.arange(
-        0,
-        batch_size * model.count,
-        model.count,
-    )
-    model.register_buffer("idx_offset", idx_offset)
