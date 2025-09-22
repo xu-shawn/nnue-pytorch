@@ -169,8 +169,9 @@ def feature_transformer_slice_backward(
         output_size=output_size
     )
 
-    with open("triton_kernel.ptx", "w") as a:
-        print(f_bwd.asm["ptx"], file=a)
+    print(f_bwd.cache)
+    # with open("triton_kernel.ptx", "w") as a:
+    #     print(f_bwd.asm["ptx"], file=a)
 
 
 
