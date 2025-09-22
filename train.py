@@ -482,6 +482,7 @@ def main():
         trainer.fit(nnue, train, val)
 
     cache = feature_transformer._feature_transformer_slice_backward_kernel.cache
+    print(cache)
     cache_entry = cache[0]
     compiled_kernel = list(cache_entry.values())[0]
     asm_dict = compiled_kernel.asm
