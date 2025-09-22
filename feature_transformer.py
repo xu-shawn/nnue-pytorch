@@ -81,19 +81,6 @@ def feature_transformer_slice_forward(
     )
 
 
-@triton.autotune(
-    configs=[
-        triton.Config({"OUTPUT_BLOCK_SIZE": 8}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 16}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 32}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 64}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 128}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
-    ],
-    key=["max_active_features", "output_size"]
-)
 @triton.jit
 def _feature_transformer_slice_backward_kernel(
         feature_indices,
@@ -154,7 +141,7 @@ def feature_transformer_slice_backward(
     def grid(meta):
         return (
             batch_size,
-            triton.cdiv(output_size, meta['OUTPUT_BLOCK_SIZE'])
+            triton.cdiv(output_size, 1024)
         )
 
     kernel = _feature_transformer_slice_backward_kernel[grid](
@@ -164,7 +151,8 @@ def feature_transformer_slice_backward(
         bias_grad=bias_grad,
         output_grad=output_grad,
         max_active_features=max_active_features,
-        output_size=output_size
+        output_size=output_size,
+        OUTPUT_BLOCK_SIZE=1024
     )
 
     print(kernel.asm)
