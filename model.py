@@ -152,34 +152,6 @@ class NNUEModel(nn.Module):
         self.feature_set = feature_set
         self.layer_stacks = LayerStacks(self.num_ls_buckets)
 
-        self.nnue2score = 600.0
-        self.weight_scale_hidden = 64.0
-        self.weight_scale_out = 16.0
-        self.quantized_one = 127.0
-
-        max_hidden_weight = self.quantized_one / self.weight_scale_hidden
-        max_out_weight = (self.quantized_one * self.quantized_one) / (
-            self.nnue2score * self.weight_scale_out
-        )
-        self.weight_clipping = [
-            {
-                "params": [self.layer_stacks.l1.weight],
-                "min_weight": -max_hidden_weight,
-                "max_weight": max_hidden_weight,
-                "virtual_params": self.layer_stacks.l1_fact.weight,
-            },
-            {
-                "params": [self.layer_stacks.l2.weight],
-                "min_weight": -max_hidden_weight,
-                "max_weight": max_hidden_weight,
-            },
-            {
-                "params": [self.layer_stacks.output.weight],
-                "min_weight": -max_out_weight,
-                "max_weight": max_out_weight,
-            },
-        ]
-
         self._init_layers()
 
     def _init_layers(self):
@@ -226,41 +198,6 @@ class NNUEModel(nn.Module):
 
         self.input.weight = nn.Parameter(input_weights)
         self.input.bias = nn.Parameter(input_bias)
-
-    def _clip_weights(self):
-        """
-        Clips the weights of the model based on the min/max values allowed
-        by the quantization scheme.
-        """
-        for group in self.weight_clipping:
-            for p in group["params"]:
-                if "min_weight" in group or "max_weight" in group:
-                    p_data_fp32 = p.data
-                    min_weight = group["min_weight"]
-                    max_weight = group["max_weight"]
-                    if "virtual_params" in group:
-                        virtual_params = group["virtual_params"]
-                        xs = p_data_fp32.shape[0] // virtual_params.shape[0]
-                        ys = p_data_fp32.shape[1] // virtual_params.shape[1]
-                        expanded_virtual_layer = virtual_params.repeat(xs, ys)
-                        if min_weight is not None:
-                            min_weight_t = (
-                                p_data_fp32.new_full(p_data_fp32.shape, min_weight)
-                                - expanded_virtual_layer
-                            )
-                            p_data_fp32 = torch.max(p_data_fp32, min_weight_t)
-                        if max_weight is not None:
-                            max_weight_t = (
-                                p_data_fp32.new_full(p_data_fp32.shape, max_weight)
-                                - expanded_virtual_layer
-                            )
-                            p_data_fp32 = torch.min(p_data_fp32, max_weight_t)
-                    else:
-                        if min_weight is not None and max_weight is not None:
-                            p_data_fp32.clamp_(min_weight, max_weight)
-                        else:
-                            raise Exception("Not supported.")
-                    p.data.copy_(p_data_fp32)
 
     def set_feature_set(self, new_feature_set: FeatureSet):
         """
@@ -384,11 +321,6 @@ class NNUE(L.LightningModule):
 
     def step_(self, batch: tuple[Tensor, ...], batch_idx, loss_type):
         _ = batch_idx  # unused, but required by pytorch-lightning
-
-        # We clip weights at the start of each step. This means that after
-        # the last step the weights might be outside of the desired range.
-        # They should be also clipped accordingly in the serializer.
-        self.model._clip_weights()
 
         (
             us,
