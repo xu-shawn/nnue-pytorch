@@ -1,9 +1,17 @@
+import argparse
 from dataclasses import dataclass
+
 
 # 3 layer fully connected network
 L1 = 3072
 L2 = 15
 L3 = 32
+
+
+class SetNetworkSize(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        global L1
+        L1 = int(values)
 
 
 # parameters needed for the definition of the loss
