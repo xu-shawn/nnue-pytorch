@@ -12,6 +12,7 @@ class SetNetworkSize(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
         global L1
         L1 = int(values)
+        print(L1)
 
 
 # parameters needed for the definition of the loss
