@@ -375,7 +375,7 @@ struct Full_Threats {
     static constexpr int SQUARE_NB = 64;
     static constexpr int PIECE_NB = 12;
     static constexpr int COLOR_NB = 2;
-    static constexpr int PIECE_TYPE_NB = 8;
+    static constexpr int PIECE_TYPE_NB = 6;
     static constexpr int MAX_ACTIVE_FEATURES = 128+32;
 
     static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
@@ -397,7 +397,7 @@ struct Full_Threats {
         a8, a8, a8, a8, h8, h8, h8, h8 }
     };
     
-    static constexpr int map[PIECE_TYPE_NB-2][PIECE_TYPE_NB-2] = {
+    static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
       {0, 1, -1, 2, -1, -1},
       {0, 1, 2, 3, 4, 5},
       {0, 1, 2, 3, -1, 4},
@@ -460,7 +460,7 @@ struct Full_Threats {
                 Color c = order[(int)color][i];
                 PieceType pt = PieceType(j);
                 Piece attkr = Piece(pt, c);
-                Bitboard bb  = pos.piecesBB(attkr);
+                Bitboard bb = pos.piecesBB(attkr);
                 if (pt == PieceType::Pawn) {
                     auto right = (c == Color::White) ? Offset(1, 1) : Offset(-1, -1);
                     auto left = (c == Color::White) ? Offset(-1, 1) : Offset(1, -1);
@@ -498,7 +498,7 @@ struct Full_Threats {
                         values[k] = 1.0f;
                         features[k] = psq_index(color, ksq, from, attkr);
                         k++;
-                        Bitboard attacks = pos.attacks(from);
+                        Bitboard attacks = pos.attacks(from) & pieces;
                         for (Square to: attacks) {
                             Piece attkd = pos.pieceAt(to);
                             std::optional<int> index = threat_index(color, attkr, from, to, attkd, ksq);
