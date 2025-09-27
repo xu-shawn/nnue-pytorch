@@ -346,6 +346,197 @@ struct HalfKAv2_hmFactorized {
     }
 };
 
+struct Full_Threats {
+    static constexpr int SQUARE_NB = 64;
+    static constexpr int PIECE_NB = 12;
+    static constexpr int COLOR_NB = 2;
+    static constexpr int PIECE_TYPE_NB = 8;
+    static constexpr int MAX_ACTIVE_FEATURES = 128+32;
+    // Unique number for each piece type on each square
+    enum {
+        PS_NONE     = 0,
+        PS_W_PAWN   = 0,
+        PS_W_KNIGHT = 1 * SQUARE_NB,
+        PS_W_BISHOP = 2 * SQUARE_NB,
+        PS_W_ROOK   = 3 * SQUARE_NB,
+        PS_W_QUEEN  = 4 * SQUARE_NB,
+        PS_W_KING   = 5 * SQUARE_NB,
+        PS_B_PAWN   = 6 * SQUARE_NB,
+        PS_B_KNIGHT = 7 * SQUARE_NB,
+        PS_B_BISHOP = 8 * SQUARE_NB,
+        PS_B_ROOK   = 9 * SQUARE_NB,
+        PS_B_QUEEN  = 10 * SQUARE_NB,
+        PS_B_KING   = 11 * SQUARE_NB,
+        PS_NB       = 12 * SQUARE_NB  
+    };
+    
+    static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
+      { a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1,
+        a1, a1, a1, a1, h1, h1, h1, h1 },
+      { a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8,
+        a8, a8, a8, a8, h8, h8, h8, h8 }
+    };
+
+    
+    int threatoffsets[PIECE_NB][SQUARE_NB+2];
+    void init_threat_offsets() {
+        int pieceoffset = 0;
+        Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop,
+        blackBishop, whiteRook, blackRook, whiteQueen, blackQueen, whiteKing, blackKing};
+        for (int piece = 0; piece < 12; piece++) {
+            threatoffsets[piece][65] = pieceoffset;
+            int squareoffset = 0;
+            for (int from = (int)a1; from <= (int)h8; from++) {
+                threatoffsets[piece][from] = squareoffset;
+                if (piecetbl[piece].type() != PieceType::Pawn) {
+                    Bitboard attacks = bb::detail::pseudoAttacks()[piecetbl[piece].type()][Square(from)];
+                    squareoffset += attacks.count();
+                }
+                else if (from >= (int)a2 && from <= (int)h7) {
+                    Bitboard attacks = bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
+                    squareoffset += attacks.count();
+                }
+            }
+            threatoffsets[piece][64] = squareoffset;
+            pieceoffset += numvalidtargets[piece]*squareoffset;
+        }
+    }
+    static constexpr int numvalidtargets[PIECE_NB] = {6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8};
+    static constexpr int map[PIECE_TYPE_NB-2][PIECE_TYPE_NB-2] = {
+      {0, 1, -1, 2, -1, -1},
+      {0, 1, 2, 3, 4, 5},
+      {0, 1, 2, 3, -1, 4},
+      {0, 1, 2, 3, -1, 4},
+      {0, 1, 2, 3, 4, 5},
+      {0, 1, 2, 3, -1, -1}
+    };
+
+
+    Full_Threats() { init_threat_offsets(); };
+
+    static constexpr int NUM_SQ = 64;
+    static constexpr int NUM_PT = 11;
+    static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
+    static constexpr int INPUTS = 79856 + NUM_PLANES * NUM_SQ / 2;
+    static constexpr int KingBuckets[64] = {
+      -1, -1, -1, -1, 31, 30, 29, 28,
+      -1, -1, -1, -1, 27, 26, 25, 24,
+      -1, -1, -1, -1, 23, 22, 21, 20,
+      -1, -1, -1, -1, 19, 18, 17, 16,
+      -1, -1, -1, -1, 15, 14, 13, 12,
+      -1, -1, -1, -1, 11, 10, 9, 8,
+      -1, -1, -1, -1, 7, 6, 5, 4,
+      -1, -1, -1, -1, 3, 2, 1, 0
+    };
+
+    static int psq_index(Color color, Square ksq, Square sq, Piece p)
+    {
+        Square o_ksq = orient_flip_2(color, ksq, ksq);
+        auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+        if (p_idx == 11)
+            --p_idx; // pack the opposite king into the same NUM_SQ * NUM_SQ
+        return 79856 + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
+    }
+    
+    std::optional<int> threat_index(Color Perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
+        bool enemy = (attkr.color() != attkd.color());
+        from = (Square)(int(from) ^ (int)OrientTBL[(int)Perspective][(int)ksq]);
+        to = (Square)(int(to) ^ (int)OrientTBL[(int)Perspective][(int)ksq]);
+        if (Perspective == Color::Black) {
+            attkr = Piece::fromId((int)attkr ^ 1);
+            attkd = Piece::fromId((int)attkd ^ 1);
+        }
+        if ((map[(int)attkr.type()][(int)attkd.type()] < 0) || (attkr.type() == attkd.type() && (enemy || attkr.type() != PieceType::Pawn) && from < to)) {
+            return std::nullopt;
+        }
+        Bitboard attacks = (attkr.type() == PieceType::Pawn) ? bb::pawnAttacks(Bitboard::square(Square(from)), attkr.color()) : bb::detail::pseudoAttacks()[attkr.type()][Square(from)];
+        Bitboard upto = Bitboard::square(to);
+        return int(threatoffsets[(int)attkr][65] + 
+            (int(attkd.color())*(numvalidtargets[(int)attkr]/2)+map[(int)attkr.type()][(int)attkd.type()])*threatoffsets[(int)attkr][64]
+        + threatoffsets[(int)attkr][(int)from] + (Bitboard::fromBits((1ULL << (int)to)-1) & attacks).count());
+    }
+
+    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color)
+    {
+        auto& pos = e.pos;
+        auto pieces = pos.piecesBB();
+        auto ksq = pos.kingSquare(color);
+        Color order[2][2] = {{Color::White, Color::Black}, {Color::Black, Color::White}};
+        int k = 0;
+        for (int i = (int)Color::White; i <= (int)Color::Black; i++) {
+            for (int j = (int)PieceType::Pawn; j <= (int)PieceType::King; j++) {
+                Color c = order[(int)color][i];
+                PieceType pt = PieceType(j);
+                Piece attkr = Piece(pt, c);
+                Bitboard bb  = pos.piecesBB(attkr);
+                if (pt == PieceType::Pawn) {
+                    auto right = (c == Color::White) ? Offset(1, 1) : Offset(-1, -1);
+                    auto left = (c == Color::White) ? Offset(-1, 1) : Offset(1, -1);
+                    auto attacks_left = bb.shifted(right) & pieces;
+                    auto attacks_right = bb.shifted(left) & pieces;
+                    for (Square to: attacks_left) {
+                        Square from = Square((int)to - (c == Color::White ? 9 : -9));
+                        Piece attkd = pos.pieceAt(to);
+                        std::optional<int> index = threat_index(color, attkr, from, to, attkd, ksq);
+                        if (index.has_value()) {
+                            values[k] = 1.0f;
+                            features[k] = index.value();
+                            k++;
+                        }
+                    }
+                    for (Square to: attacks_right) {
+                        Square from = Square((int)to - (c == Color::White ? 7 : -7));
+                        Piece attkd = pos.pieceAt(to);
+                        std::optional<int> index = threat_index(color, attkr, from, to, attkd, ksq);
+                        if (index.has_value()) {
+                            values[k] = 1.0f;
+                            features[k] = index.value();
+                            k++;
+                        }
+                    }
+                    for (Square from: bb) {
+                        values[k] = 1.0f;
+                        features[k] = psq_index(color, ksq, from, attkr);
+                        k++;
+                    }
+                }
+                else {
+                    for (Square from: bb)
+                    {
+                        values[k] = 1.0f;
+                        features[k] = psq_index(color, ksq, from, attkr);
+                        k++;
+                        Bitboard attacks = pos.attacks(from);
+                        for (Square to: attacks) {
+                            Piece attkd = pos.pieceAt(to);
+                            std::optional<int> index = threat_index(color, attkr, from, to, attkd, ksq);
+                            if (index.has_value()) {
+                                values[k] = 1.0f;
+                                features[k] = index.value();
+                                k++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return { k, INPUTS };
+    }
+};
+
 template <typename T, typename... Ts>
 struct FeatureSet
 {
