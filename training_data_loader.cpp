@@ -1190,6 +1190,10 @@ extern "C" {
         {
             return new SparseBatch(FeatureSet<HalfKAv2_hmFactorized>{}, entries);
         }
+        else if (feature_set == "Full_Threats") 
+        {
+            return new SparseBatch(FeatureSet<Full_Threats>{}, entries);
+        }
         fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
         return nullptr;
     }
@@ -1246,6 +1250,10 @@ extern "C" {
         else if (feature_set == "HalfKAv2_hm^")
         {
             return new FeaturedBatchStream<FeatureSet<HalfKAv2_hmFactorized>, SparseBatch>(concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
+        }
+        else if (feature_set == "Full_Threats") 
+        {
+            return new FeaturedBatchStream<FeatureSet<Full_Threats>, SparseBatch>(concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
         }
         fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
         return nullptr;
