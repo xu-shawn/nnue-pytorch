@@ -346,6 +346,31 @@ struct HalfKAv2_hmFactorized {
     }
 };
 
+constexpr int numvalidtargets[12] = {6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8};
+int threatoffsets[12][66];
+void init_threat_offsets() {
+    int pieceoffset = 0;
+    Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop,
+    blackBishop, whiteRook, blackRook, whiteQueen, blackQueen, whiteKing, blackKing};
+    for (int piece = 0; piece < 12; piece++) {
+        threatoffsets[piece][65] = pieceoffset;
+        int squareoffset = 0;
+        for (int from = (int)a1; from <= (int)h8; from++) {
+            threatoffsets[piece][from] = squareoffset;
+            if (piecetbl[piece].type() != PieceType::Pawn) {
+                Bitboard attacks = bb::detail::pseudoAttacks()[piecetbl[piece].type()][Square(from)];
+                squareoffset += attacks.count();
+            }
+            else if (from >= (int)a2 && from <= (int)h7) {
+                Bitboard attacks = bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
+                squareoffset += attacks.count();
+            }
+        }
+        threatoffsets[piece][64] = squareoffset;
+        pieceoffset += numvalidtargets[piece]*squareoffset;
+    }
+}
+
 struct Full_Threats {
     static constexpr int SQUARE_NB = 64;
     static constexpr int PIECE_NB = 12;
@@ -372,30 +397,6 @@ struct Full_Threats {
         a8, a8, a8, a8, h8, h8, h8, h8 }
     };
     
-    int threatoffsets[PIECE_NB][SQUARE_NB+2];
-    void init_threat_offsets() {
-        int pieceoffset = 0;
-        Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop,
-        blackBishop, whiteRook, blackRook, whiteQueen, blackQueen, whiteKing, blackKing};
-        for (int piece = 0; piece < 12; piece++) {
-            threatoffsets[piece][65] = pieceoffset;
-            int squareoffset = 0;
-            for (int from = (int)a1; from <= (int)h8; from++) {
-                threatoffsets[piece][from] = squareoffset;
-                if (piecetbl[piece].type() != PieceType::Pawn) {
-                    Bitboard attacks = bb::detail::pseudoAttacks()[piecetbl[piece].type()][Square(from)];
-                    squareoffset += attacks.count();
-                }
-                else if (from >= (int)a2 && from <= (int)h7) {
-                    Bitboard attacks = bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
-                    squareoffset += attacks.count();
-                }
-            }
-            threatoffsets[piece][64] = squareoffset;
-            pieceoffset += numvalidtargets[piece]*squareoffset;
-        }
-    }
-    static constexpr int numvalidtargets[PIECE_NB] = {6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8};
     static constexpr int map[PIECE_TYPE_NB-2][PIECE_TYPE_NB-2] = {
       {0, 1, -1, 2, -1, -1},
       {0, 1, 2, 3, 4, 5},
@@ -404,9 +405,6 @@ struct Full_Threats {
       {0, 1, 2, 3, 4, 5},
       {0, 1, 2, 3, -1, -1}
     };
-
-
-    Full_Threats() { init_threat_offsets(); };
 
     static constexpr int NUM_SQ = 64;
     static constexpr int NUM_PT = 11;
@@ -432,7 +430,7 @@ struct Full_Threats {
         return 79856 + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
     }
     
-    std::optional<int> threat_index(Color Perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
+    static std::optional<int> threat_index(Color Perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
         bool enemy = (attkr.color() != attkd.color());
         from = (Square)(int(from) ^ (int)OrientTBL[(int)Perspective][(int)ksq]);
         to = (Square)(int(to) ^ (int)OrientTBL[(int)Perspective][(int)ksq]);
@@ -450,7 +448,7 @@ struct Full_Threats {
         + threatoffsets[(int)attkr][(int)from] + (Bitboard::fromBits((1ULL << (int)to)-1) & attacks).count());
     }
 
-    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color)
+    static std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color)
     {
         auto& pos = e.pos;
         auto pieces = pos.piecesBB();
@@ -1298,7 +1296,7 @@ int main(int argc, char** argv)
         std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
         return 1;
     }
-
+    init_threat_offsets();
     const char** files = const_cast<const char**>(&argv[1]);
     int file_count = argc - 1;
 
