@@ -352,24 +352,7 @@ struct Full_Threats {
     static constexpr int COLOR_NB = 2;
     static constexpr int PIECE_TYPE_NB = 8;
     static constexpr int MAX_ACTIVE_FEATURES = 128+32;
-    // Unique number for each piece type on each square
-    enum {
-        PS_NONE     = 0,
-        PS_W_PAWN   = 0,
-        PS_W_KNIGHT = 1 * SQUARE_NB,
-        PS_W_BISHOP = 2 * SQUARE_NB,
-        PS_W_ROOK   = 3 * SQUARE_NB,
-        PS_W_QUEEN  = 4 * SQUARE_NB,
-        PS_W_KING   = 5 * SQUARE_NB,
-        PS_B_PAWN   = 6 * SQUARE_NB,
-        PS_B_KNIGHT = 7 * SQUARE_NB,
-        PS_B_BISHOP = 8 * SQUARE_NB,
-        PS_B_ROOK   = 9 * SQUARE_NB,
-        PS_B_QUEEN  = 10 * SQUARE_NB,
-        PS_B_KING   = 11 * SQUARE_NB,
-        PS_NB       = 12 * SQUARE_NB  
-    };
-    
+
     static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
       { a1, a1, a1, a1, h1, h1, h1, h1,
         a1, a1, a1, a1, h1, h1, h1, h1,
@@ -388,7 +371,6 @@ struct Full_Threats {
         a8, a8, a8, a8, h8, h8, h8, h8,
         a8, a8, a8, a8, h8, h8, h8, h8 }
     };
-
     
     int threatoffsets[PIECE_NB][SQUARE_NB+2];
     void init_threat_offsets() {
@@ -1336,7 +1318,7 @@ int main(int argc, char** argv)
         .simple_eval_skipping = 0,
         .param_index = 0
     };
-    auto stream = create_sparse_batch_stream("HalfKAv2_hm^", concurrency, file_count, files, batch_size, cyclic, config);
+    auto stream = create_sparse_batch_stream("Full_Threats", concurrency, file_count, files, batch_size, cyclic, config);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
