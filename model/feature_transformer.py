@@ -446,6 +446,9 @@ class DoubleFeatureTransformerSliceFunction(autograd.Function):
         assert feature_indices_1.dtype == torch.int32
         assert feature_values_1.dtype == torch.float32
 
+        print(f"dfts weight dtype {weight.dtype}")
+        print(f"dfts bias dtype {bias.dtype}")
+
         assert len(weight.shape) == 2
         assert weight.dtype == torch.float32
 

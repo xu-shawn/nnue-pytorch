@@ -438,6 +438,8 @@ def quantize_ft(model: NNUEModel):
     model.input.bias.data = model.input.bias.data.mul(
         model.quantization.quantized_one
     ).round()
+    print(f"qft weight {model.input.weight.dtype}")
+    print(f"qft bias {model.input.bias.dtype}")
 
 
 def forward_ft(
@@ -575,6 +577,9 @@ def command_gather(args):
         )
 
     model.eval()
+
+    print(f"cg weight {model.input.weight.dtype}")
+    print(f"cg bias {model.input.bias.dtype}")
 
     actmat = gather_impl(model, args.data, args.count)
 
