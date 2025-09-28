@@ -100,6 +100,8 @@ def main():
                 f, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig()
             )
             nnue.model = reader.model
+            print(f"nnue.model {nnue.model.input.weight.dtype}")
+            print(f"nnue.model {nnue.model.input.bias.dtype}")
             if args.description is None:
                 args.description = reader.description
     else:

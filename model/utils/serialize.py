@@ -315,8 +315,14 @@ class NNUEReader:
             )
         )
 
+        print(f"rft {weight.dtype}")
+        print(f"rft {bias.dtype}")
+
         layer.bias.data = torch.cat([bias, torch.tensor([0] * num_psqt_buckets)])
         layer.weight.data = torch.cat([weight, psqt_weight], dim=1)
+
+        print(f"rft.d {layer.weight.dtype}")
+        print(f"rft.d {layer.bias.dtype}")
 
     def read_fc_layer(self, layer: nn.Linear, is_output: bool = False) -> None:
         # FC inputs are padded to 32 elements by spec.
