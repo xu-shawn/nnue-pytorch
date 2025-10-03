@@ -97,22 +97,38 @@ class VirtualWeights(nn.Module):
         )
 
     def apply_to(self, target: torch.Tensor) -> None:
-        for i in range(NUM_SQ // 2):
-            begin = self.offset + NUM_PLANES_REAL * i
-            end_pieces = self.offset + NUM_PLANES_REAL * (i + 1) - NUM_SQ
-            end = self.offset + NUM_PLANES_REAL * (i + 1)
+        N = NUM_SQ // 2
+        num_outputs = self.weight.shape[1]
 
-            # Merge non-king pieces
-            target[begin:end_pieces] += self.weight[: (NUM_PT_REAL - 1) * NUM_SQ]
+        # Apply pieces weights
+        non_king_len = (NUM_PT_REAL - 1) * NUM_SQ
+        target_non_king_view = torch.as_strided(
+            target,
+            size=(N, non_king_len, num_outputs),
+            stride=(NUM_PLANES_REAL, 1, target.stride(1)),
+            storage_offset=self.offset,
+        )
+        non_king_weight = self.weight[:non_king_len]
+        target_non_king_view += non_king_weight.unsqueeze(0)
 
-            # Extract weights for other king
-            merged_king = self.weight[NUM_PT_REAL * NUM_SQ : NUM_PT_VIRTUAL * NUM_SQ].clone()
+        # Apply king weights
+        other_king_weight = self.weight[NUM_PT_REAL * NUM_SQ : NUM_PT_VIRTUAL * NUM_SQ]
+        our_king_idx_start = (NUM_PT_REAL - 1) * NUM_SQ
+        our_king_weight = self.weight[our_king_idx_start : our_king_idx_start + N]
 
-            # Patch in our king's weight at point
-            merged_king[i] = self.weight[i + (NUM_PT_REAL - 1) * NUM_SQ]
+        king_offset = self.offset + non_king_len
+        target_king_view = torch.as_strided(
+            target,
+            size=(N, NUM_SQ, num_outputs),
+            stride=(NUM_PLANES_REAL, 1, target.stride(1)),
+            storage_offset=king_offset,
+        )
+        target_king_view += other_king_weight.unsqueeze(0)
 
-            # Merge in king weights
-            target[end_pieces:end] += merged_king
+        # Correct king weights
+        king_indices = torch.arange(N, device=target.device)
+        correction = our_king_weight - other_king_weight[king_indices]
+        target_king_view[king_indices, king_indices] += correction
 
 
 class FactorizedFeatures(FeatureBlock):
