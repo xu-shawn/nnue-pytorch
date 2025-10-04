@@ -392,6 +392,7 @@ def main():
             lr=args.lr,
             param_index=args.param_index,
             config=M.ModelConfig(L1=args.l1),
+            quantize_config=M.QuantizationConfig(),
         )
     else:
         nnue = torch.load(args.resume_from_model, weights_only=False)
@@ -428,9 +429,11 @@ def main():
         t_set_num_threads(args.threads)
 
     logdir = args.default_root_dir if args.default_root_dir else "logs/"
-    print("Using log dir {}".format(logdir), flush=True)
 
     tb_logger = pl_loggers.TensorBoardLogger(logdir)
+
+    print("Using log dir {}".format(tb_logger.log_dir), flush=True)
+
     checkpoint_callback = ModelCheckpoint(
         save_last=args.save_last_network,
         every_n_epochs=args.network_save_period,

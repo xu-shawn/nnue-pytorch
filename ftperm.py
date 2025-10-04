@@ -31,17 +31,28 @@ python serialize.py nn-5af11540bbfe.nnue permuted.nnue --features=HalfKAv2_hm --
 
 """
 
-import time
 import argparse
-import chess
-import torch
 import copy
+from dataclasses import dataclass
+import time
+from typing import Callable, Generator, TypeAlias
+
+import chess
 import cupy as cp
 import numpy as np
+import numpy.typing as npt
+import torch
 
 import data_loader
 import model as M
-from model import FeatureSet, NNUE, NNUEModel, NNUEReader, ModelConfig
+from model import (
+    FeatureSet,
+    NNUE,
+    NNUEModel,
+    NNUEReader,
+    ModelConfig,
+    QuantizationConfig,
+)
 
 
 """
@@ -54,7 +65,7 @@ ZERO_BLOCK_SIZE = 4
 VERBOSE = False
 
 
-def batched(arr, batch_size):
+def batched(arr: npt.NDArray, batch_size: int) -> Generator[npt.NDArray, None, None]:
     """
     Utility generator that yields chunks of array `arr` of size `batch_size`
     Expects arr to be a numpy-like array
@@ -66,14 +77,14 @@ def batched(arr, batch_size):
         idx += batch_size
 
 
-def apply_swap(perm, i, j):
+def apply_swap(perm: npt.NDArray, i: int, j: int) -> None:
     """
     Swap `i`-th and `j`-th elements in the array `perm`.
     """
     perm[i], perm[j] = perm[j], perm[i]
 
 
-def apply_rotate_right(perm, indices):
+def apply_rotate_right(perm: npt.NDArray, indices: tuple[int, ...]) -> None:
     """
     Rotates right the values in `perm` at selected indices `indices`.
     The rotation is performed as-if the selected indices were layed out in the order
@@ -85,7 +96,9 @@ def apply_rotate_right(perm, indices):
         perm[i] = j
 
 
-def get_swapped_zero_positive_count(actmat_flat, use_cupy=True):
+def get_swapped_zero_positive_count(
+    actmat_flat: npt.NDArray[np.bool_], use_cupy: bool = True
+) -> int:
     if use_cupy:
         actmat_flat = cp.asarray(actmat_flat, dtype=cp.int8)
 
@@ -141,7 +154,9 @@ def get_swapped_zero_positive_count(actmat_flat, use_cupy=True):
     return swapped_zero_count
 
 
-def get_swapped_zero_increase(actmat, use_cupy=True):
+def get_swapped_zero_increase(
+    actmat: npt.NDArray[np.bool_], use_cupy: bool = True
+) -> npt.NDArray[np.int_]:
     n_neurons = actmat.shape[1]
     swapped_zero_count = 0
 
@@ -172,7 +187,9 @@ def get_swapped_zero_increase(actmat, use_cupy=True):
     return swapped_zero_increase
 
 
-def get_score_change(actmat, use_cupy=True):
+def get_score_change(
+    actmat: npt.NDArray[np.bool_], use_cupy: bool = True
+) -> npt.NDArray[np.int_]:
     # actmat is a boolean matrix of shape (N, L1) with "True" meaning 0
 
     n_neurons = actmat.shape[1]
@@ -186,7 +203,16 @@ def get_score_change(actmat, use_cupy=True):
     return score_change
 
 
-def make_swaps_2(actmat, use_cupy=True):
+@dataclass
+class SwapResult:
+    swaps: list[tuple[int, ...]]
+    score_change: float
+
+
+SwapFunction: TypeAlias = Callable[[npt.NDArray[np.bool_], bool], SwapResult]
+
+
+def make_swaps_2(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapResult:
     """
     Returns a series of independent 2-swap operations that collectively improve the objective function.
     """
@@ -197,14 +223,13 @@ def make_swaps_2(actmat, use_cupy=True):
 
     n_neurons = actmat.shape[1]
     n_samples = actmat.shape[0]
-    n_blocks = n_neurons // ZERO_BLOCK_SIZE
 
     # Compute the score change of swapping i-th and j-th neurons
     score_change = get_score_change(actmat, use_cupy=use_cupy)
     # Sum score_change[i, j] + score_change[j, i] to get the cumulative impact of the swap.
     score_change = score_change + score_change.T
 
-    def all_indices_in_same_block(i):
+    def all_indices_in_same_block(i: np.int_) -> list[int]:
         """Returns a list of indices of all neurons in the same block as the i-th neuron."""
         # Floor to the start of the block.
         base = i // ZERO_BLOCK_SIZE * ZERO_BLOCK_SIZE
@@ -242,10 +267,10 @@ def make_swaps_2(actmat, use_cupy=True):
     print(f"Time elapsed: {time.time() - start_time:0.3f}")
     print(f"Improvement this iteration: {total_improvement:0.3f}")
 
-    return swaps, total_improvement
+    return SwapResult(swaps, total_improvement)
 
 
-def make_swaps_3(actmat, use_cupy=True):
+def make_swaps_3(actmat: npt.NDArray[np.bool_], use_cupy: bool = True) -> SwapResult:
     """
     Returns a series of independent left-rotates operations that collectively improve the objective function.
     """
@@ -268,7 +293,6 @@ def make_swaps_3(actmat, use_cupy=True):
         + (score_changes.T)[:, None, :]
     )
 
-    orig_shape = (n_neurons,) * 3
     compressed_shape = (n_blocks, ZERO_BLOCK_SIZE) * 3
     cycles = []
     total_score_change = 0
@@ -335,10 +359,12 @@ def make_swaps_3(actmat, use_cupy=True):
     total_improvement = total_score_change / n_samples / (n_neurons // 4) * 100
     print(f"Time elapsed: {time.time() - start_time:0.3f}")
     print(f"Improvement this iteration: {total_improvement:0.3f}")
-    return cycles, total_improvement
+    return SwapResult(cycles, total_improvement)
 
 
-def find_perm_impl(actmat, use_cupy, L1: int):
+def find_perm_impl(
+    actmat: npt.NDArray[np.bool_], use_cupy: bool, L1: int
+) -> npt.NDArray[np.int_]:
     actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1] // 2))
     if use_cupy:
         actmat = cp.asarray(actmat, dtype=cp.int8)
@@ -347,7 +373,7 @@ def find_perm_impl(actmat, use_cupy, L1: int):
     total_score_change = 0
     perm = np.arange(L1 // 2)
 
-    stages = [make_swaps_2, make_swaps_3]
+    stages: list[SwapFunction] = [make_swaps_2, make_swaps_3]
     # The optimization routines are deterministic, so no need to retry.
     stages_max_fails = [0, 0]
     stage_id = 0
@@ -365,15 +391,15 @@ def find_perm_impl(actmat, use_cupy, L1: int):
 
         # Calculate a set of independent right rotates (so swaps for 2 element case)
         # that when applied improve the objective function
-        swaps, score_change = swap_fn(actmat, use_cupy)
-        for cycle in swaps:
+        swap_result = swap_fn(actmat, use_cupy)
+        for cycle in swap_result.swaps:
             # Update the current best permutation with the newly found adjustments.
             apply_rotate_right(perm, cycle)
 
-        total_score_change += score_change
+        total_score_change += swap_result.score_change
         print(f"Total improvement: {total_score_change}\n")
 
-        if score_change == 0:
+        if swap_result.score_change == 0:
             num_fails += 1
             if num_fails > stages_max_fails[stage_id]:
                 num_fails = 0
@@ -393,13 +419,20 @@ def find_perm_impl(actmat, use_cupy, L1: int):
 # -------------------------------------------------------------
 
 
-def read_model(nnue_path, feature_set: FeatureSet, config: ModelConfig):
+def read_model(
+    nnue_path: str,
+    feature_set: FeatureSet,
+    config: ModelConfig,
+    quantize_config: QuantizationConfig,
+) -> NNUEModel:
     with open(nnue_path, "rb") as f:
-        reader = NNUEReader(f, feature_set, config)
+        reader = NNUEReader(f, feature_set, config, quantize_config)
         return reader.model
 
 
-def make_fen_batch_provider(data_path, batch_size):
+def make_fen_batch_provider(
+    data_path: str, batch_size: int
+) -> data_loader.FenBatchProvider:
     return data_loader.FenBatchProvider(
         data_path,
         True,
@@ -411,7 +444,7 @@ def make_fen_batch_provider(data_path, batch_size):
     )
 
 
-def filter_fens(fens):
+def filter_fens(fens: list[str]) -> list[str]:
     # We don't want fens where a king is in check, as these cannot be evaluated by the engine.
     filtered_fens = []
     for fen in fens:
@@ -421,22 +454,26 @@ def filter_fens(fens):
     return filtered_fens
 
 
-def quantize_ft(model):
-    model.input.weight.data = model.input.weight.data.mul(model.quantized_one).round()
-    model.input.bias.data = model.input.bias.data.mul(model.quantized_one).round()
+def quantize_ft(model: NNUEModel) -> None:
+    model.input.weight.data = model.input.weight.data.mul(
+        model.quantization.quantized_one
+    ).round()
+    model.input.bias.data = model.input.bias.data.mul(
+        model.quantization.quantized_one
+    ).round()
 
 
 def forward_ft(
-    model,
-    us,
-    them,
-    white_indices,
-    white_values,
-    black_indices,
-    black_values,
-    psqt_indices,
-    layer_stack_indices,
-):
+    model: NNUEModel,
+    us: torch.Tensor,
+    them: torch.Tensor,
+    white_indices: torch.Tensor,
+    white_values: torch.Tensor,
+    black_indices: torch.Tensor,
+    black_values: torch.Tensor,
+    psqt_indices: torch.Tensor,
+    layer_stack_indices: torch.Tensor,
+) -> torch.Tensor:
     wp, bp = model.input(white_indices, white_values, black_indices, black_values)
     w, _ = torch.split(wp, model.L1, dim=1)
     b, _ = torch.split(bp, model.L1, dim=1)
@@ -452,7 +489,7 @@ def forward_ft(
     return l0_.round()
 
 
-def eval_ft(model, batch: data_loader.SparseBatchPtr):
+def eval_ft(model: NNUEModel, batch: data_loader.SparseBatchPtr) -> torch.Tensor:
     with torch.no_grad():
         (
             us,
@@ -480,10 +517,10 @@ def eval_ft(model, batch: data_loader.SparseBatchPtr):
         return res
 
 
-def ft_permute_impl(model, permutation):
-    permutation = list(permutation)
+def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
+    permutation = list(perm)
 
-    l1_size = model.layer_stacks.l1.in_features
+    l1_size = model.layer_stacks.l1.linear.in_features
     if l1_size != len(permutation) * 2:
         raise Exception(
             f"Invalid permutation size. Expected {l1_size}. Got {len(permutation) * 2}."
@@ -498,19 +535,19 @@ def ft_permute_impl(model, permutation):
     # Apply the permutation in place.
     model.input.weight.data = model.input.weight.data[:, ft_permutation]
     model.input.bias.data = model.input.bias.data[ft_permutation]
-    model.layer_stacks.l1.weight.data = model.layer_stacks.l1.weight.data[
+    model.layer_stacks.l1.linear.weight.data = model.layer_stacks.l1.linear.weight.data[
         :, permutation
     ]
 
 
-def ft_permute(model, ft_perm_path):
+def ft_permute(model: NNUEModel, ft_perm_path: str) -> None:
     with open(ft_perm_path, "rb") as f:
         permutation = np.load(f)
 
     ft_permute_impl(model, permutation)
 
 
-def gather_impl(model, dataset, count):
+def gather_impl(model: NNUEModel, dataset: str, count: int) -> npt.NDArray[np.bool_]:
     ZERO_POINT = 0.0  # Vary this to check hypothetical forced larger truncation to zero
     BATCH_SIZE = 1000
 
@@ -545,14 +582,20 @@ def gather_impl(model, dataset, count):
     return np.concatenate(actmats, axis=0)
 
 
-def command_gather(args):
+def command_gather(args: argparse.Namespace) -> None:
     feature_set = M.get_feature_set_from_name(args.features)
     if args.checkpoint:
-        model = NNUE.load_from_checkpoint(
-            args.checkpoint, feature_set=feature_set, config=ModelConfig(L1=args.l1)
+        nnue = NNUE.load_from_checkpoint(
+            args.checkpoint,
+            feature_set=feature_set,
+            config=ModelConfig(L1=args.l1),
+            quantize_config=QuantizationConfig(),
         )
+        model = nnue.model
     else:
-        model = read_model(args.net, feature_set, ModelConfig(L1=args.l1))
+        model = read_model(
+            args.net, feature_set, ModelConfig(L1=args.l1), QuantizationConfig()
+        )
 
     model.eval()
 
@@ -562,13 +605,15 @@ def command_gather(args):
         np.save(file, actmat)
 
 
-def eval_act_mat(actmat):
+def eval_act_mat(actmat: npt.NDArray[np.bool_]) -> float:
     actmat = actmat.reshape((actmat.shape[0], actmat.shape[1] // 4, 4))
     r = np.all(actmat, axis=2)
     return np.count_nonzero(r) / r.shape[0] / r.shape[1]
 
 
-def eval_perm_impl(actmat, perm=None):
+def eval_perm_impl(
+    actmat: npt.NDArray[np.bool_], perm: npt.NDArray[np.int_] | None = None
+) -> None:
     actmat = np.reshape(actmat, (actmat.shape[0] * 2, actmat.shape[1] // 2))
 
     actmat_eval = eval_act_mat(actmat)
@@ -580,7 +625,7 @@ def eval_perm_impl(actmat, perm=None):
         print(f"Combined zeros in perm matrix: {perm_act_mat_eval * 100:0.6f}")
 
 
-def command_eval_perm(args):
+def command_eval_perm(args: argparse.Namespace) -> None:
     with open(args.data, "rb") as file:
         actmat = np.load(file)
 
@@ -593,11 +638,11 @@ def command_eval_perm(args):
     eval_perm_impl(actmat, perm)
 
 
-def command_find_perm(args):
+def command_find_perm(args: argparse.Namespace) -> None:
     with open(args.data, "rb") as file:
         actmat = np.load(file)
 
-    perm = find_perm_impl(actmat, args.use_cupy)
+    perm = find_perm_impl(actmat, args.use_cupy, args.l1)
 
     # perm = np.random.permutation([i for i in range(L1)])
     with open(args.out, "wb") as file:
@@ -606,12 +651,12 @@ def command_find_perm(args):
 
 def ft_optimize(
     model: NNUEModel,
-    dataset_path,
-    count,
-    actmat_save_path=None,
-    perm_save_path=None,
-    use_cupy=True,
-):
+    dataset_path: str,
+    count: int,
+    actmat_save_path: str | None = None,
+    perm_save_path: str | None = None,
+    use_cupy: bool = True,
+) -> None:
     print("Gathering activation data...")
     actmat = gather_impl(model, dataset_path, count)
     if actmat_save_path is not None:
@@ -620,7 +665,7 @@ def ft_optimize(
 
     print("Finding permutation...")
     perm = find_perm_impl(actmat, use_cupy, model.L1)
-    if actmat_save_path is not None:
+    if perm_save_path is not None:
         with open(perm_save_path, "wb") as file:
             np.save(file, perm)
 
@@ -631,12 +676,12 @@ def ft_optimize(
     ft_permute_impl(model, perm)
 
 
-def set_cupy_device(device):
+def set_cupy_device(device: int) -> None:
     if device is not None:
         cp.cuda.runtime.setDevice(device)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="")
     parser.add_argument(
         "--no-cupy",

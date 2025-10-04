@@ -6,6 +6,7 @@ from torch import Tensor, nn
 from .config import LossParams, ModelConfig
 from .features import FeatureSet
 from .model import NNUEModel
+from .quantize import QuantizationConfig
 
 
 def _get_parameters(layers: list[nn.Module]):
@@ -29,6 +30,7 @@ class NNUE(L.LightningModule):
         self,
         feature_set: FeatureSet,
         config: ModelConfig,
+        quantize_config: QuantizationConfig,
         max_epoch=800,
         num_batches_per_epoch=int(100_000_000 / 16384),
         gamma=0.992,
@@ -40,7 +42,7 @@ class NNUE(L.LightningModule):
     ):
         super().__init__()
         self.model: NNUEModel = NNUEModel(
-            feature_set, config, num_psqt_buckets, num_ls_buckets
+            feature_set, config, quantize_config, num_psqt_buckets, num_ls_buckets
         )
         self.loss_params = loss_params
         self.max_epoch = max_epoch
@@ -79,7 +81,7 @@ class NNUE(L.LightningModule):
                 psqt_indices,
                 layer_stack_indices,
             )
-            * self.model.nnue2score
+            * self.model.quantization.nnue2score
         )
 
         p = self.loss_params
@@ -123,14 +125,14 @@ class NNUE(L.LightningModule):
         LR = self.lr
         train_params = [
             {"params": _get_parameters([self.model.input]), "lr": LR, "gc_dim": 0},
-            {"params": [self.model.layer_stacks.l1_fact.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l1_fact.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.l1.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l1.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.l2.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.l2.bias], "lr": LR},
-            {"params": [self.model.layer_stacks.output.weight], "lr": LR},
-            {"params": [self.model.layer_stacks.output.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.factorized_linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.factorized_linear.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.l1.linear.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.l2.linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.l2.linear.bias], "lr": LR},
+            {"params": [self.model.layer_stacks.output.linear.weight], "lr": LR},
+            {"params": [self.model.layer_stacks.output.linear.bias], "lr": LR},
         ]
 
         optimizer = ranger21.Ranger21(

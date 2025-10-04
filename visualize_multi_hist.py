@@ -84,10 +84,13 @@ def main():
         labels.append("\n".join(label.split("-")))
 
     models = [
-        M.load_model(m, feature_set, M.ModelConfig(L1=args.l1)) for m in args.models
+        M.load_model(m, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig())
+        for m in args.models
     ]
 
-    coalesced_ins = [M.coalesce_ft_weights(model, model.input) for model in models]
+    coalesced_ins = [
+        M.coalesce_ft_weights(model.feature_set, model.input) for model in models
+    ]
     input_weights = [
         coalesced_in[:, : args.l1].flatten().numpy() for coalesced_in in coalesced_ins
     ]

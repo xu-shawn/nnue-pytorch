@@ -39,12 +39,14 @@ class NNUEVisualizer:
 
     def plot_input_weights(self):
         # Coalesce weights and transform them to Numpy domain.
-        weights = M.coalesce_ft_weights(self.model, self.model.input)
+        weights = M.coalesce_ft_weights(self.model.feature_set, self.model.input)
         weights = weights[:, : self.model.L1]
         weights = weights.flatten().numpy()
 
         if self.args.ref_model:
-            ref_weights = M.coalesce_ft_weights(self.ref_model, self.ref_model.input)
+            ref_weights = M.coalesce_ft_weights(
+                self.ref_model.feature_set, self.ref_model.input
+            )
             ref_weights = ref_weights[:, : self.model.L1]
             ref_weights = ref_weights.flatten().numpy()
             weights -= ref_weights
@@ -495,10 +497,8 @@ class NNUEVisualizer:
                 vmax = self.args.fc_weights_vmax
 
             if self.args.fc_weights_auto_scale or self.args.fc_weights_vmin < 0:
-                plot_abs = False
                 cmap = "coolwarm"
             else:
-                plot_abs = True
                 cmap = "viridis"
 
             for bucket_id, (l1, l2, output) in enumerate(
@@ -663,7 +663,9 @@ def main():
 
     label = basename(args.model)
 
-    model = M.load_model(args.model, feature_set, M.ModelConfig(L1=args.l1))
+    model = M.load_model(
+        args.model, feature_set, M.ModelConfig(L1=args.l1), M.QuantizationConfig()
+    )
 
     if args.ref_model:
         if args.ref_features:
@@ -673,7 +675,10 @@ def main():
             ref_feature_set = feature_set
 
         ref_model = M.load_model(
-            args.ref_model, ref_feature_set, M.ModelConfig(L1=args.l1)
+            args.ref_model,
+            ref_feature_set,
+            M.ModelConfig(L1=args.l1),
+            M.QuantizationConfig(),
         )
 
         print(
