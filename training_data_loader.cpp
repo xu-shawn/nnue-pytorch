@@ -317,6 +317,67 @@ struct HalfKAv2_hmFactorized {
     }
 };
 
+struct HalfKAv3_hm {
+    static constexpr int NUM_SQ = 64;
+    static constexpr int NUM_PT = 12;
+    static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
+    static constexpr int INPUTS = NUM_PLANES * NUM_SQ / 2;
+
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static constexpr int KingBuckets[64] = {
+      -1, -1, -1, -1, 31, 30, 29, 28,
+      -1, -1, -1, -1, 27, 26, 25, 24,
+      -1, -1, -1, -1, 23, 22, 21, 20,
+      -1, -1, -1, -1, 19, 18, 17, 16,
+      -1, -1, -1, -1, 15, 14, 13, 12,
+      -1, -1, -1, -1, 11, 10, 9, 8,
+      -1, -1, -1, -1, 7, 6, 5, 4,
+      -1, -1, -1, -1, 3, 2, 1, 0
+    };
+
+    static int feature_index(Color color, Square ksq, Square sq, Piece p)
+    {
+        Square o_ksq = orient_flip_2(color, ksq, ksq);
+        auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+        return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
+    }
+
+    static std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color)
+    {
+        auto& pos = e.pos;
+        auto pieces = pos.piecesBB();
+        auto ksq = pos.kingSquare(color);
+
+        int j = 0;
+
+        for(Square sq : pieces)
+        {
+            auto p = pos.pieceAt(sq);
+            values[j] = 1.0f;
+            features[j] = feature_index(color, ksq, sq, p);
+            ++j;
+        }
+
+        return { j, INPUTS };
+    }
+};
+
+struct HalfKAv3_hmFactorized {
+    // Factorized features
+    static constexpr int NUM_PT = 12;
+    static constexpr int PIECE_INPUTS = HalfKAv2_hm::NUM_SQ * NUM_PT;
+    static constexpr int INPUTS = HalfKAv2_hm::INPUTS + PIECE_INPUTS;
+
+    static constexpr int MAX_PIECE_FEATURES = 32;
+    static constexpr int MAX_ACTIVE_FEATURES = HalfKAv2_hm::MAX_ACTIVE_FEATURES + MAX_PIECE_FEATURES;
+
+    static std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color)
+    {
+        return HalfKAv3_hm::fill_features_sparse(e, features, values, color);
+    }
+};
+
 template <typename T, typename... Ts>
 struct FeatureSet
 {
@@ -969,6 +1030,14 @@ extern "C" {
         else if (feature_set == "HalfKAv2_hm^")
         {
             return new SparseBatch(FeatureSet<HalfKAv2_hmFactorized>{}, entries);
+        }
+        else if (feature_set == "HalfKAv3_hm")
+        {
+            return new SparseBatch(FeatureSet<HalfKAv3_hm>{}, entries);
+        }
+        else if (feature_set == "HalfKAv3_hm^")
+        {
+            return new SparseBatch(FeatureSet<HalfKAv3_hmFactorized>{}, entries);
         }
         fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
         return nullptr;
