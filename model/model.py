@@ -1,5 +1,8 @@
+from dataclasses import dataclass
 from typing import Generator
 
+import numpy as np
+import numpy.typing as npt
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
@@ -8,6 +11,12 @@ from .config import ModelConfig
 from .feature_transformer import DoubleFeatureTransformerSlice
 from .features import FeatureSet
 from .quantize import QuantizationConfig, QuantizationManager
+
+
+@dataclass
+class LayerData:
+    bias: npt.NDArray
+    weight: npt.NDArray
 
 
 class StackedLinear(nn.Module):
@@ -104,6 +113,13 @@ class FactorizedStackedLinear(StackedLinear):
         self.factorized_linear.bias.zero_()
 
 
+@dataclass
+class LayerStacksData:
+    l1: LayerData
+    l2: LayerData
+    l3: LayerData
+
+
 class LayerStacks(nn.Module):
     def __init__(self, count: int, config: ModelConfig):
         super().__init__()
@@ -153,6 +169,27 @@ class LayerStacks(nn.Module):
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(self) -> None:
         self.l1.coalesce_weights()
+
+    def serialize(self) -> LayerStacksData:
+        for l1, l2, output in self.get_coalesced_layer_stacks():
+            pass
+        return LayerStacksData()
+
+    def deserialize(self, layer_stacks: LayerStacksData) -> None:
+        return
+
+
+@dataclass
+class FeatureTransformerData:
+    bias: npt.NDArray
+    weight: npt.NDArray
+    psqt_weight: npt.NDArray
+
+
+@dataclass
+class ModelData:
+    input: LayerData
+    layer_stacks: LayerStacksData
 
 
 class NNUEModel(nn.Module):
@@ -345,3 +382,16 @@ class NNUEModel(nn.Module):
         x = self.layer_stacks(l0_, layer_stack_indices) + (wpsqt - bpsqt) * (us - 0.5)
 
         return x
+
+    def serialize(self) -> ModelData:
+        input = LayerData(self.input.weight.flatten().numpy(), self.input.bias.flatten().numpy())
+        layer_stacks = self.layer_stacks.serialize()
+        return ModelData(input, layer_stacks)
+
+    @torch.no_grad()
+    def deserialize(self, data: ModelData) -> None:
+        b_shape = self.input.bias.shape
+        w_shape = self.input.weight.shape
+        self.input.bias.copy_(torch.from_numpy(data.input.bias).reshape(b_shape))
+        self.input.weight.copy_(torch.from_numpy(data.input.weight.reshape(w_shape)))
+        self.layer_stacks.deserialize(data.layer_stacks)
