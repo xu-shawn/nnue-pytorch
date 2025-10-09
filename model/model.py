@@ -1,11 +1,13 @@
 from dataclasses import dataclass
-from typing import Generator
+from typing import Generator, Sequence, TypeAlias
 
 import numpy as np
 import numpy.typing as npt
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
+
+from model.utils.coalesce_weights import coalesce_ft_weights
 
 from .config import ModelConfig
 from .feature_transformer import DoubleFeatureTransformerSlice
@@ -114,10 +116,13 @@ class FactorizedStackedLinear(StackedLinear):
 
 
 @dataclass
-class LayerStacksData:
+class LayerStacksFrame:
     l1: LayerData
     l2: LayerData
-    l3: LayerData
+    output: LayerData
+
+
+LayerStacksData: TypeAlias = list[LayerStacksFrame]
 
 
 class LayerStacks(nn.Module):
@@ -170,13 +175,87 @@ class LayerStacks(nn.Module):
     def coalesce_layer_stacks_inplace(self) -> None:
         self.l1.coalesce_weights()
 
-    def serialize(self) -> LayerStacksData:
-        for l1, l2, output in self.get_coalesced_layer_stacks():
-            pass
-        return LayerStacksData()
+    @staticmethod
+    @torch.no_grad()
+    def serialize_layer(bias: torch.Tensor, weight: torch.Tensor) -> LayerData:
+        num_input = weight.shape[1]
 
-    def deserialize(self, layer_stacks: LayerStacksData) -> None:
-        return
+        # Pad to 32 elements by specification
+        if num_input % 32 != 0:
+            num_input += 32 - (num_input % 32)
+            new_w = torch.zeros(weight.shape[0], num_input, dtype=torch.int8)
+            new_w[:, : weight.shape[1]] = weight
+            weight = new_w
+
+        return LayerData(bias.flatten().numpy(), weight.flatten().numpy())
+
+    @staticmethod
+    @torch.no_grad()
+    def deserialize_layer(
+        layer_data: LayerData, non_padded_shape: Sequence
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        bias = torch.from_numpy(layer_data.bias)
+
+        padded_shape = (non_padded_shape[0], ((non_padded_shape[1] + 31) // 32) * 32)
+        weight = torch.from_numpy(layer_data.weight.reshape(padded_shape))
+        weight = weight[:, non_padded_shape[1]]
+
+        return bias, weight
+
+    @torch.no_grad()
+    def serialize(self) -> LayerStacksData:
+        layers: list[LayerStacksFrame] = []
+
+        for l1, l2, output in self.get_coalesced_layer_stacks():
+            layers.append(
+                LayerStacksFrame(
+                    self.serialize_layer(l1.bias, l1.weight),
+                    self.serialize_layer(l2.bias, l2.weight),
+                    self.serialize_layer(output.bias, output.weight),
+                )
+            )
+
+        return layers
+
+    @torch.no_grad()
+    def deserialize(self, layer_stacks_data: LayerStacksData) -> None:
+        l1_bias: list[torch.Tensor] = []
+        l2_bias: list[torch.Tensor] = []
+        output_bias: list[torch.Tensor] = []
+        l1_weight: list[torch.Tensor] = []
+        l2_weight: list[torch.Tensor] = []
+        output_weight: list[torch.Tensor] = []
+
+        def deserialize_layer(layer: LayerData, target: StackedLinear):
+            return self.deserialize_layer(
+                layer, (target.out_features, target.in_features)
+            )
+
+        for frame in layer_stacks_data:
+            l1_bias_frame, l1_weight_frame = deserialize_layer(frame.l1, self.l1)
+            l2_bias_frame, l2_weight_frame = deserialize_layer(frame.l2, self.l2)
+            output_bias_frame, output_weight_frame = deserialize_layer(
+                frame.output, self.output
+            )
+
+            l1_bias.append(l1_bias_frame)
+            l2_bias.append(l2_bias_frame)
+            output_bias.append(output_bias_frame)
+
+            l1_weight.append(l1_weight_frame)
+            l2_weight.append(l2_weight_frame)
+            output_weight.append(output_weight_frame)
+
+        self.l1.linear.bias.copy_(torch.concat(l1_bias))
+        self.l2.linear.bias.copy_(torch.concat(l2_bias))
+        self.output.linear.bias.copy_(torch.concat(output_bias))
+
+        self.l1.linear.weight.copy_(torch.concat(l1_weight))
+        self.l2.linear.weight.copy_(torch.concat(l2_weight))
+        self.output.linear.weight.copy_(torch.concat(output_weight))
+
+        self.l1.factorized_linear.bias.zero_()
+        self.l1.factorized_linear.weight.zero_()
 
 
 @dataclass
@@ -188,7 +267,7 @@ class FeatureTransformerData:
 
 @dataclass
 class ModelData:
-    input: LayerData
+    input: FeatureTransformerData
     layer_stacks: LayerStacksData
 
 
@@ -384,14 +463,36 @@ class NNUEModel(nn.Module):
         return x
 
     def serialize(self) -> ModelData:
-        input = LayerData(self.input.weight.flatten().numpy(), self.input.bias.flatten().numpy())
+        all_weight = coalesce_ft_weights(self.feature_set, self.input)
+        weight = all_weight[:, : self.L1]
+        psqt_weight = all_weight[:, self.L1 :]
+
+        input = FeatureTransformerData(
+            self.input.bias.flatten().numpy(),
+            weight.flatten().numpy(),
+            psqt_weight.flatten().numpy(),
+        )
         layer_stacks = self.layer_stacks.serialize()
+
         return ModelData(input, layer_stacks)
 
     @torch.no_grad()
     def deserialize(self, data: ModelData) -> None:
         b_shape = self.input.bias.shape
+        raw_bias = torch.from_numpy(data.input.bias).reshape(
+            b_shape[0] - self.num_psqt_buckets
+        )
+        self.input.bias.copy_(torch.cat([raw_bias, torch.zeros(self.num_psqt_buckets)]))
+
         w_shape = self.input.weight.shape
-        self.input.bias.copy_(torch.from_numpy(data.input.bias).reshape(b_shape))
-        self.input.weight.copy_(torch.from_numpy(data.input.weight.reshape(w_shape)))
+        raw_weight = torch.from_numpy(
+            np.concatenate(
+                data.input.weight.reshape(
+                    w_shape[0], w_shape[1] - self.num_psqt_buckets
+                ),
+                data.input.psqt_weight.reshape(w_shape[0], self.num_psqt_buckets),
+            )
+        )
+        self.input.weight.copy_(raw_weight)
+
         self.layer_stacks.deserialize(data.layer_stacks)
