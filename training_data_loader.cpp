@@ -348,7 +348,7 @@ struct HalfKAv2_hmFactorized {
 
 constexpr int numvalidtargets[12] = {6, 6, 12, 12, 10, 10, 10, 10, 12, 12, 8, 8};
 int threatoffsets[12][66];
-void init_threat_offsets() {
+void __attribute__ ((constructor)) init_threat_offsets() {
     int pieceoffset = 0;
     Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop,
     blackBishop, whiteRook, blackRook, whiteQueen, blackQueen, whiteKing, blackKing};
@@ -430,7 +430,7 @@ struct Full_Threats {
         return 79856 + static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
     }
     
-    static std::optional<int> threat_index(Color Perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
+    static int threat_index(Color Perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
         bool enemy = (attkr.color() != attkd.color());
         from = (Square)(int(from) ^ (int)OrientTBL[(int)Perspective][(int)ksq]);
         to = (Square)(int(to) ^ (int)OrientTBL[(int)Perspective][(int)ksq]);
@@ -439,7 +439,7 @@ struct Full_Threats {
             attkd = Piece::fromId((int)attkd ^ 1);
         }
         if ((map[(int)attkr.type()][(int)attkd.type()] < 0) || (attkr.type() == attkd.type() && (enemy || attkr.type() != PieceType::Pawn) && from < to)) {
-            return std::nullopt;
+            return -1;
         }
         Bitboard attacks = (attkr.type() == PieceType::Pawn) ? bb::pawnAttacks(Bitboard::square(Square(from)), attkr.color()) : bb::detail::pseudoAttacks()[attkr.type()][Square(from)];
         Bitboard upto = Bitboard::square(to);
@@ -469,20 +469,20 @@ struct Full_Threats {
                     for (Square to: attacks_left) {
                         Square from = Square((int)to - (c == Color::White ? 9 : -9));
                         Piece attkd = pos.pieceAt(to);
-                        std::optional<int> index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index.has_value()) {
+                        int index = threat_index(color, attkr, from, to, attkd, ksq);
+                        if (index >= 0) {
                             values[k] = 1.0f;
-                            features[k] = index.value();
+                            features[k] = index;
                             k++;
                         }
                     }
                     for (Square to: attacks_right) {
                         Square from = Square((int)to - (c == Color::White ? 7 : -7));
                         Piece attkd = pos.pieceAt(to);
-                        std::optional<int> index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index.has_value()) {
+                        int index = threat_index(color, attkr, from, to, attkd, ksq);
+                        if (index >= 0) {
                             values[k] = 1.0f;
-                            features[k] = index.value();
+                            features[k] = index;
                             k++;
                         }
                     }
@@ -501,10 +501,10 @@ struct Full_Threats {
                         Bitboard attacks = pos.attacks(from) & pieces;
                         for (Square to: attacks) {
                             Piece attkd = pos.pieceAt(to);
-                            std::optional<int> index = threat_index(color, attkr, from, to, attkd, ksq);
-                            if (index.has_value()) {
+                            int index = threat_index(color, attkr, from, to, attkd, ksq);
+                            if (index >= 0) {
                                 values[k] = 1.0f;
-                                features[k] = index.value();
+                                features[k] = index;
                                 k++;
                             }
                         }
@@ -1292,11 +1292,11 @@ long long get_rchar_self() {
 
 int main(int argc, char** argv)
 {
+    init_threat_offsets();
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0] << " file1 [file2 ...]\n";
         return 1;
     }
-    init_threat_offsets();
     const char** files = const_cast<const char**>(&argv[1]);
     int file_count = argc - 1;
 
