@@ -352,22 +352,25 @@ void __attribute__ ((constructor)) init_threat_offsets() {
     int pieceoffset = 0;
     Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop,
     blackBishop, whiteRook, blackRook, whiteQueen, blackQueen, whiteKing, blackKing};
-    for (int piece = 0; piece < 12; piece++) {
-        threatoffsets[piece][65] = pieceoffset;
-        int squareoffset = 0;
-        for (int from = (int)a1; from <= (int)h8; from++) {
-            threatoffsets[piece][from] = squareoffset;
-            if (piecetbl[piece].type() != PieceType::Pawn) {
-                Bitboard attacks = bb::detail::pseudoAttacks()[piecetbl[piece].type()][Square(from)];
-                squareoffset += attacks.count();
+    for (int c = 0; c < 2; c++) {
+        for (int pt = 0; pt < 6; pt++) {
+            int piece = 2 * pt + c;
+            threatoffsets[piece][65] = pieceoffset;
+            int squareoffset = 0;
+            for (int from = (int)a1; from <= (int)h8; from++) {
+                threatoffsets[piece][from] = squareoffset;
+                if (piecetbl[piece].type() != PieceType::Pawn) {
+                    Bitboard attacks = bb::detail::pseudoAttacks()[piecetbl[piece].type()][Square(from)];
+                    squareoffset += attacks.count();
+                }
+                else if (from >= (int)a2 && from <= (int)h7) {
+                    Bitboard attacks = bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
+                    squareoffset += attacks.count();
+                }
             }
-            else if (from >= (int)a2 && from <= (int)h7) {
-                Bitboard attacks = bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
-                squareoffset += attacks.count();
-            }
+            threatoffsets[piece][64] = squareoffset;
+            pieceoffset += numvalidtargets[piece]*squareoffset;
         }
-        threatoffsets[piece][64] = squareoffset;
-        pieceoffset += numvalidtargets[piece]*squareoffset;
     }
 }
 
