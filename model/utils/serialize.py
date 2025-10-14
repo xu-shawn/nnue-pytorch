@@ -13,7 +13,7 @@ from .coalesce_weights import coalesce_ft_weights
 from ..config import ModelConfig
 from ..features import FeatureSet
 from ..feature_transformer import BaseFeatureTransformerSlice
-from ..model import NNUEModel
+from ..model import NNUEModel, ModelData
 from ..quantize import QuantizationConfig
 
 
@@ -73,7 +73,7 @@ class NNUEWriter:
 
     def __init__(
         self,
-        model: NNUEModel,
+        raw_model: NNUEModel,
         description: str | None = None,
         ft_compression: str = "none",
     ):
@@ -81,6 +81,8 @@ class NNUEWriter:
             description = DEFAULT_DESCRIPTION
 
         self.buf = bytearray()
+
+        model = raw_model.serialize()
 
         # NOTE: model.clip_weights() should probably be called here. It's not necessary now
         # because it doesn't have more restrictive bounds than these defined by quantization,
@@ -96,10 +98,10 @@ class NNUEWriter:
             self.write_fc_layer(model, output, is_output=True)
 
     @staticmethod
-    def fc_hash(model: NNUEModel) -> int:
+    def fc_hash(model: ModelData) -> int:
         # InputSlice hash
         prev_hash = 0xEC42E90D
-        prev_hash ^= model.L1 * 2
+        prev_hash ^= model.config.L1 * 2
 
         # Fully connected layers
         layers = [
@@ -118,7 +120,7 @@ class NNUEWriter:
             prev_hash = layer_hash
         return layer_hash
 
-    def write_header(self, model: NNUEModel, fc_hash: int, description: str) -> None:
+    def write_header(self, model: ModelData, fc_hash: int, description: str) -> None:
         self.int32(VERSION)  # version
         self.int32(
             fc_hash ^ model.feature_set.hash ^ (model.L1 * 2)
@@ -141,7 +143,7 @@ class NNUEWriter:
         else:
             raise Exception("Invalid compression method.")
 
-    def write_feature_transformer(self, model: NNUEModel, ft_compression: str) -> None:
+    def write_feature_transformer(self, model: ModelData, ft_compression: str) -> None:
         layer = model.input
 
         bias = layer.bias.data[: model.L1]
@@ -168,7 +170,7 @@ class NNUEWriter:
         self.write_tensor(psqt_weight.flatten().numpy(), ft_compression)
 
     def write_fc_layer(
-        self, model: NNUEModel, layer: nn.Linear, is_output=False
+        self, model: ModelData, layer: nn.Linear, is_output=False
     ) -> None:
         # FC layers are stored as int8 weights, and int32 biases
         bias = layer.bias.data

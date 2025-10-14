@@ -260,6 +260,7 @@ class LayerStacks(nn.Module):
 
 @dataclass
 class FeatureTransformerData:
+    hash: int
     bias: npt.NDArray
     weight: npt.NDArray
     psqt_weight: npt.NDArray
@@ -267,6 +268,7 @@ class FeatureTransformerData:
 
 @dataclass
 class ModelData:
+    config: ModelConfig
     input: FeatureTransformerData
     layer_stacks: LayerStacksData
 
@@ -282,6 +284,7 @@ class NNUEModel(nn.Module):
     ):
         super().__init__()
 
+        self.config = config
         self.L1 = config.L1
         self.L2 = config.L2
         self.L3 = config.L3
@@ -468,13 +471,14 @@ class NNUEModel(nn.Module):
         psqt_weight = all_weight[:, self.L1 :]
 
         input = FeatureTransformerData(
+            self.feature_set.hash,
             self.input.bias.flatten().numpy(),
             weight.flatten().numpy(),
             psqt_weight.flatten().numpy(),
         )
         layer_stacks = self.layer_stacks.serialize()
 
-        return ModelData(input, layer_stacks)
+        return ModelData(self.config, input, layer_stacks)
 
     @torch.no_grad()
     def deserialize(self, data: ModelData) -> None:
