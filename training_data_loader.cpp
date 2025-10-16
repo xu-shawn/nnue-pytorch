@@ -522,7 +522,6 @@ struct Full_Threats {
 
 struct Full_ThreatsFactorized {
     // Factorized features
-    static constexpr int PIECE_NB = 12;
     static constexpr int PIECE_INPUTS = 768;
     static constexpr int INPUTS = 79856 + 22528 + 768;
     static constexpr int MAX_ACTIVE_FEATURES = 128 + 32 + 32;
@@ -1202,6 +1201,10 @@ extern "C" {
         else if (feature_set == "Full_Threats") 
         {
             return new SparseBatch(FeatureSet<Full_Threats>{}, entries);
+        }
+        else if (feature_set == "Full_Threats^") 
+        {
+            return new SparseBatch(FeatureSet<Full_ThreatsFactorized>{}, entries);
         }
         fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
         return nullptr;
