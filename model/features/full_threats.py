@@ -160,9 +160,11 @@ class FactorizedFeatures(FeatureBlock):
     def get_feature_factors(self, idx: int) -> list[int]:
         if idx >= self.num_real_features:
             raise Exception("Feature must be real")
-
-        a_idx = idx % NUM_PLANES_REAL
-        k_idx = idx // NUM_PLANES_REAL
+        if idx < 79856:
+            return [idx]
+        
+        a_idx = (idx - 79856) % NUM_PLANES_REAL
+        k_idx = (idx - 79856) // NUM_PLANES_REAL
 
         if a_idx // NUM_SQ == 10 and k_idx != KingBuckets[a_idx % NUM_SQ]:
             a_idx += NUM_SQ

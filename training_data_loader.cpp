@@ -520,6 +520,34 @@ struct Full_Threats {
     }
 };
 
+struct Full_ThreatsFactorized {
+    // Factorized features
+    static constexpr int PIECE_NB = 12;
+    static constexpr int PIECE_INPUTS = 768;
+    static constexpr int INPUTS = 79856 + 22528 + 768;
+    static constexpr int MAX_ACTIVE_FEATURES = 128 + 32 + 32;
+
+    static std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color)
+    {
+        const auto [start_j, offset] = Full_Threats::fill_features_sparse(e, features, values, color);
+        auto& pos = e.pos;
+        auto pieces = pos.piecesBB();
+        auto ksq = pos.kingSquare(color);
+
+        int j = start_j;
+        for(Square sq : pieces)
+        {
+            auto p = pos.pieceAt(sq);
+            auto p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            values[j] = 1.0f;
+            features[j] = offset + (p_idx * HalfKAv2_hm::NUM_SQ) + static_cast<int>(orient_flip_2(color, sq, ksq));
+            ++j;
+        }
+
+        return { j, INPUTS };
+    }
+}
+
 template <typename T, typename... Ts>
 struct FeatureSet
 {
