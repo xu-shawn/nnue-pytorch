@@ -31,12 +31,18 @@ class QuantizationManager:
         self.ft_quantized_one = config.ft_quantized_one
 
         self.max_hidden_weight = config.hidden_quantized_one / self.weight_scale_hidden
+        self.max_threat_weight = config.ft_quantized_one / 512
         self.max_out_weight = (config.hidden_quantized_one * self.hidden_quantized_one) / (self.nnue2score * self.weight_scale_out)
 
     def generate_weight_clipping_config(
         self, model: "NNUEModel"
     ) -> list[WeightClippingConfig]:
         return [
+            {
+                "params": [model.input.weight[0:79856]],
+                "min_weight": -self.max_threat_weight,
+                "max_weight": self.max_threat_weight,
+            },
             {
                 "params": [model.layer_stacks.l1.linear.weight],
                 "min_weight": -self.max_hidden_weight,
