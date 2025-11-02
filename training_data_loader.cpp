@@ -1202,7 +1202,7 @@ extern "C" {
         {
             return new SparseBatch(FeatureSet<Full_Threats>{}, entries);
         }
-        else if (feature_set == "Full_Threats^") 
+        else if (feature_set == "Full_Threats^")
         {
             return new SparseBatch(FeatureSet<Full_ThreatsFactorized>{}, entries);
         }
@@ -1266,6 +1266,10 @@ extern "C" {
         else if (feature_set == "Full_Threats") 
         {
             return new FeaturedBatchStream<FeatureSet<Full_Threats>, SparseBatch>(concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
+        }
+        else if (feature_set == "Full_Threats^") 
+        {
+            return new FeaturedBatchStream<FeatureSet<Full_ThreatsFactorized>, SparseBatch>(concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
         }
         fprintf(stderr, "Unknown feature_set %s\n", feature_set_c);
         return nullptr;
