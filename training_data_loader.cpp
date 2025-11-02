@@ -545,7 +545,7 @@ struct Full_ThreatsFactorized {
 
         return { j, INPUTS };
     }
-}
+};
 
 template <typename T, typename... Ts>
 struct FeatureSet
