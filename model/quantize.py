@@ -71,7 +71,7 @@ class QuantizationManager:
             .to(torch.int32)
         )
 
-        weight[0:79856].clamp(-128, 127)
+        weight[0:79856] = weight[0:79856].clamp(-128, 127)
 
         callback(bias, weight, psqt_weight)
 
