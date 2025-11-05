@@ -153,6 +153,19 @@ class LayerStacks(nn.Module):
         self.l1.coalesce_weights()
 
 
+class FakeQuantize(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input_tensor, Q):
+        quantized_tensor = torch.round(input_tensor * Q) / Q
+        return quantized_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        assert not ctx.needs_input_grad[1]
+        grad_input = grad_output.clone()
+        return grad_input, None
+
+
 class NNUEModel(nn.Module):
     def __init__(
         self,
@@ -261,7 +274,7 @@ class NNUEModel(nn.Module):
                         else:
                             raise Exception("Not supported.")
                     p.data.copy_(p_data_fp32)
-    
+
     def clip_threat_weights(self):
         p = self.input.weight[0:79856]
         p_data_fp32 = p.data
@@ -335,6 +348,7 @@ class NNUEModel(nn.Module):
         b, bpsqt = torch.split(bp, self.L1, dim=1)
         l0_ = (us * torch.cat([w, b], dim=1)) + (them * torch.cat([b, w], dim=1))
         l0_ = torch.clamp(l0_, 0.0, 1.0)
+        l0_ = FakeQuantize.apply(l0_, self.quantization.ft_quantized_one)
 
         l0_s = torch.split(l0_, self.L1 // 2, dim=1)
         l0_s1 = [l0_s[0] * l0_s[1], l0_s[2] * l0_s[3]]
