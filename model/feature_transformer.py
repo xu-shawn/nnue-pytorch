@@ -598,17 +598,32 @@ class FeatureTransformerSlice(BaseFeatureTransformerSlice):
         )
 
 
+class FakeQuantize(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input_tensor, Q):
+        quantized_tensor = torch.round(input_tensor * Q) / Q
+        return quantized_tensor
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        assert not ctx.needs_input_grad[1]
+        grad_input = grad_output.clone()
+        return grad_input, None
+
+
 class DoubleFeatureTransformerSlice(BaseFeatureTransformerSlice):
     def forward(
         self, feature_indices_0, feature_values_0, feature_indices_1, feature_values_1
     ):
+        q_weight = FakeQuantize.apply(self.weight, 255)
+        q_bias = FakeQuantize.apply(self.bias, 255)
         return DoubleFeatureTransformerSliceFunction.apply(
             feature_indices_0,
             feature_values_0,
             feature_indices_1,
             feature_values_1,
-            self.weight,
-            self.bias,
+            q_weight,
+            q_bias,
         )
 
 
