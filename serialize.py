@@ -91,6 +91,9 @@ def main():
         nnue.eval()
     elif args.source.endswith(".pt"):
         nnue = torch.load(args.source, weights_only=False)
+        nnue.model.quantization.ft_quantized_one = 255.0
+        nnue.model.quantization.hidden_quantized_one = 127.0
+        del nnue.model.quantization.quantized_one
     elif args.source.endswith(".nnue"):
         with open(args.source, "rb") as f:
             nnue = M.NNUE(

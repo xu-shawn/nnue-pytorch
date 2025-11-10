@@ -97,7 +97,7 @@ class QuantizationManager:
         callback: Callable = lambda *args, **kwargs: None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         kWeightScaleHidden = self.weight_scale_hidden
-        kWeightScaleOut = self.nnue2score * self.weight_scale_out / self.quantized_one
+        kWeightScaleOut = self.nnue2score * self.weight_scale_out / self.hidden_quantized_one
         kWeightScale = kWeightScaleOut if output_layer else kWeightScaleHidden
         kBiasScaleOut = self.weight_scale_out * self.nnue2score
         kBiasScaleHidden = self.weight_scale_hidden * self.hidden_quantized_one
