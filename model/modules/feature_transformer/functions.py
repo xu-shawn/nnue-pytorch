@@ -2,8 +2,8 @@ import torch
 from torch import autograd
 
 from .kernel import (
-    make_sparse_input_linear_forward_kernel,
-    make_sparse_input_linear_backward_kernel,
+    sparse_input_linear_backward,
+    sparse_input_linear_forward,
 )
 
 
@@ -52,18 +52,15 @@ class SparseLinearFunction(autograd.Function):
             requires_grad=True,
         )
 
-        kernel = make_sparse_input_linear_forward_kernel(
-            max_active_features, output_size
-        )
-        kernel(
-            grid=(batch_size,),
-            args=(
-                feature_indices.data_ptr(),
-                feature_values.data_ptr(),
-                weight.data_ptr(),
-                bias.data_ptr(),
-                output.data_ptr(),
-            ),
+        sparse_input_linear_forward(
+            feature_indices.data_ptr(),
+            feature_values.data_ptr(),
+            weight.data_ptr(),
+            bias.data_ptr(),
+            output.data_ptr(),
+            batch_size,
+            max_active_features,
+            output_size
         )
 
         return output
@@ -87,18 +84,15 @@ class SparseLinearFunction(autograd.Function):
         )
         bias_grad = torch.zeros(output_size, dtype=torch.float32, device=device)
 
-        kernel = make_sparse_input_linear_backward_kernel(
-            max_active_features, output_size
-        )
-        kernel(
-            grid=(batch_size,),
-            args=(
-                feature_indices.data_ptr(),
-                feature_values.data_ptr(),
-                weight_grad.data_ptr(),
-                bias_grad.data_ptr(),
-                grad_output.data_ptr(),
-            ),
+        sparse_input_linear_backward(
+            feature_indices.data_ptr(),
+            feature_values.data_ptr(),
+            weight_grad.data_ptr(),
+            bias_grad.data_ptr(),
+            grad_output.data_ptr(),
+            batch_size,
+            max_active_features,
+            output_size
         )
 
         return None, None, weight_grad, bias_grad
