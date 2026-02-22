@@ -12,7 +12,7 @@ import triton.language as tl
         triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 2048}),
     ],
-    key=["max_active_features", "output_size"]
+    key=["max_active_indices", "output_size"]
 )
 @triton.jit
 def sparse_input_linear_forward_kernel(
@@ -87,7 +87,7 @@ def sparse_input_linear_forward(
         triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
         triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
     ],
-    key=["max_active_features", "output_size"]
+    key=["max_active_indices", "output_size"]
 )
 @triton.jit
 def sparse_input_linear_backward_kernel(
