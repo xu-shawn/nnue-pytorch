@@ -76,16 +76,21 @@ def sparse_input_linear_forward(
     )
 
 
+def _zero_grad_buffers(nargs):
+    nargs["bias_grad"].zero_()
+    nargs["weight_grad"].zero_()
+
+
 @triton.autotune(
     configs=[
-        triton.Config({"OUTPUT_BLOCK_SIZE": 8}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 16}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 32}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 64}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 128}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 256}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 512}),
-        triton.Config({"OUTPUT_BLOCK_SIZE": 1024}),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 8}, pre_hook=_zero_grad_buffers),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 16}, pre_hook=_zero_grad_buffers),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 32}, pre_hook=_zero_grad_buffers),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 64}, pre_hook=_zero_grad_buffers),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 128}, pre_hook=_zero_grad_buffers),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 256}, pre_hook=_zero_grad_buffers),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 512}, pre_hook=_zero_grad_buffers),
+        triton.Config({"OUTPUT_BLOCK_SIZE": 1024}, pre_hook=_zero_grad_buffers),
     ],
     key=["max_active_indices", "output_size"]
 )
@@ -139,8 +144,8 @@ def sparse_input_linear_backward_kernel(
 def sparse_input_linear_backward(
         input_indices,
         input_values,
-        bias_grad,
         weight_grad,
+        bias_grad,
         output_grad,
         batch_size,
         max_active_indices,
