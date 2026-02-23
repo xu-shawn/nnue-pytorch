@@ -10,8 +10,6 @@ from .kernel import (
 class SparseLinearFunction(autograd.Function):
     @staticmethod
     def forward(ctx, feature_indices, feature_values, weight, bias):
-        ctx.save_for_backward(feature_indices, feature_values, weight, bias)
-
         assert len(feature_indices.shape) == 2
         assert len(feature_values.shape) == 2
         assert feature_indices.shape[0] == feature_values.shape[0]
@@ -52,16 +50,24 @@ class SparseLinearFunction(autograd.Function):
             requires_grad=True,
         )
 
+        # active_counts is computed as a byproduct of the forward kernel
+        active_counts = torch.empty(
+            batch_size, dtype=torch.int32, device=device
+        )
+
         sparse_input_linear_forward(
             feature_indices,
             feature_values,
             weight,
             bias,
             output,
+            active_counts,
             batch_size,
             max_active_features,
             output_size
         )
+
+        ctx.save_for_backward(feature_indices, feature_values, weight, bias, active_counts)
 
         return output
 
@@ -72,17 +78,17 @@ class SparseLinearFunction(autograd.Function):
 
         grad_output = grad_output.contiguous()
 
-        feature_indices, feature_values, weight, bias = ctx.saved_tensors
+        feature_indices, feature_values, weight, bias, active_counts = ctx.saved_tensors
 
         device = feature_indices.device
         batch_size = feature_indices.shape[0]
         max_active_features = feature_indices.shape[1]
         output_size = weight.shape[1]
 
-        weight_grad = torch.zeros(
+        weight_grad = torch.empty(
             weight.shape[0], weight.shape[1], dtype=torch.float32, device=device
         )
-        bias_grad = torch.zeros(output_size, dtype=torch.float32, device=device)
+        bias_grad = torch.empty(output_size, dtype=torch.float32, device=device)
 
         sparse_input_linear_backward(
             feature_indices,
@@ -90,6 +96,7 @@ class SparseLinearFunction(autograd.Function):
             weight_grad,
             bias_grad,
             grad_output,
+            active_counts,
             batch_size,
             max_active_features,
             output_size

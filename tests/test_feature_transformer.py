@@ -104,6 +104,17 @@ def bench():
     indices1 = get_fake_indices()
     values1 = torch.rand(BATCH_SIZE, MAX_ACTIVE_FEATURES, dtype=torch.float32).cuda()
 
+    # Warmup (triggers autotuning / compilation)
+    for _ in range(5):
+        output0, output1 = layer(indices0, values0, indices1, values1)
+        output0 = torch.clamp(output0, 0.0, 1.0)
+        output1 = torch.clamp(output1, 0.0, 1.0)
+
+        g = ((output0 - output1) ** 2).mean()
+        g.backward()
+
+        torch.cuda.synchronize()
+
     start = time.time()
 
     for _ in range(ITERS):
