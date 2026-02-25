@@ -35,7 +35,6 @@ class ComposedFeatureTransformer(nn.Module):
         self._reset_bias()
 
     def _compute_hash(self) -> int:
-        return 0xec1035ae
         h = 0
         for f in self.features:
             h = ((h << 1) | (h >> 31)) & 0xFFFFFFFF
