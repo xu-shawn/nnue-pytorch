@@ -42,21 +42,15 @@ static Square orient_flip_2(Color color, Square sq, Square ksq) {
     return sq;
 }
 
-// ============================================================
-// IFeatureExtractor interface
-// ============================================================
-
 struct IFeatureExtractor {
-    virtual ~IFeatureExtractor() = default;
-    virtual int inputs() const = 0;
-    virtual int max_active_features() const = 0;
-    virtual std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) const = 0;
+    virtual ~IFeatureExtractor()                                        = default;
+    virtual int                 inputs() const                          = 0;
+    virtual int                 max_active_features() const             = 0;
+    virtual std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
+                                                     int*                     features,
+                                                     float*                   values,
+                                                     Color                    color) const = 0;
 };
-
-// ============================================================
-// HalfKAv2_hm feature extractor
-// ============================================================
 
 struct HalfKAv2_hm {
     static constexpr std::string_view NAME = "HalfKAv2_hm";
@@ -109,18 +103,16 @@ struct HalfKAv2_hm {
     }
 };
 
-struct HalfKAv2_hmExtractor : IFeatureExtractor {
+struct HalfKAv2_hmExtractor: IFeatureExtractor {
     int inputs() const override { return HalfKAv2_hm::INPUTS; }
     int max_active_features() const override { return HalfKAv2_hm::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) const override {
+    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
+                                             int*                     features,
+                                             float*                   values,
+                                             Color                    color) const override {
         return HalfKAv2_hm::fill_features_sparse(e, features, values, color);
     }
 };
-
-// ============================================================
-// Threat feature computation (shared tables)
-// ============================================================
 
 constexpr int numvalidtargets[12] = {6, 6, 10, 10, 8, 8, 8, 8, 10, 10, 0, 0};
 
@@ -128,7 +120,7 @@ using ThreatOffsetTable = std::array<std::array<int, 66>, 12>;
 
 struct ThreatFeatureCalculation {
     ThreatOffsetTable table;
-    int totalfeatures;
+    int               totalfeatures;
 };
 
 constexpr auto threatfeaturecalc = []() {
@@ -170,13 +162,9 @@ constexpr auto threatfeaturecalc = []() {
     return ThreatFeatureCalculation{t, pieceoffset};
 }();
 
-constexpr ThreatOffsetTable threatoffsets = threatfeaturecalc.table;
-constexpr int threatfeatures = threatfeaturecalc.totalfeatures;
+constexpr ThreatOffsetTable threatoffsets  = threatfeaturecalc.table;
+constexpr int               threatfeatures = threatfeaturecalc.totalfeatures;
 static_assert(threatfeatures == 60144);
-
-// ============================================================
-// Threat-only feature struct and extractor
-// ============================================================
 
 struct Threats {
     static constexpr std::string_view NAME = "Full_Threats";
@@ -318,28 +306,28 @@ struct Threats {
     }
 };
 
-struct Full_ThreatsExtractor : IFeatureExtractor {
+struct Full_ThreatsExtractor: IFeatureExtractor {
     int inputs() const override { return Threats::INPUTS; }
     int max_active_features() const override { return Threats::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) const override {
+    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
+                                             int*                     features,
+                                             float*                   values,
+                                             Color                    color) const override {
         return Threats::fill_features_sparse(e, features, values, color);
     }
 };
 
-// ============================================================
-// ComposedFeatureExtractor
-// ============================================================
-
-struct ComposedFeatureExtractor : IFeatureExtractor {
+struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
-    int m_inputs;
-    int m_max_active;
+    int                                             m_inputs;
+    int                                             m_max_active;
 
-    ComposedFeatureExtractor(std::vector<std::unique_ptr<IFeatureExtractor>> exts)
-        : extractors(std::move(exts)), m_inputs(0), m_max_active(0)
-    {
-        for (auto& e : extractors) {
+    ComposedFeatureExtractor(std::vector<std::unique_ptr<IFeatureExtractor>> exts) :
+        extractors(std::move(exts)),
+        m_inputs(0),
+        m_max_active(0) {
+        for (auto& e : extractors)
+        {
             m_inputs += e->inputs();
             m_max_active += e->max_active_features();
         }
@@ -348,15 +336,19 @@ struct ComposedFeatureExtractor : IFeatureExtractor {
     int inputs() const override { return m_inputs; }
     int max_active_features() const override { return m_max_active; }
 
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) const override {
+    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
+                                             int*                     features,
+                                             float*                   values,
+                                             Color                    color) const override {
         int total_written = 0;
-        int input_offset = 0;
-        for (auto& ext : extractors) {
-            auto [written, ext_inputs] = ext->fill_features_sparse(
-                e, features + total_written, values + total_written, color);
+        int input_offset  = 0;
+        for (auto& ext : extractors)
+        {
+            auto [written, ext_inputs] =
+              ext->fill_features_sparse(e, features + total_written, values + total_written, color);
             // Offset the feature indices for this component
-            for (int i = 0; i < written; ++i) {
+            for (int i = 0; i < written; ++i)
+            {
                 features[total_written + i] += input_offset;
             }
             input_offset += ext_inputs;
@@ -371,8 +363,10 @@ struct ComposedFeatureExtractor : IFeatureExtractor {
 // ============================================================
 
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
-    if (name == "HalfKAv2_hm") return std::make_unique<HalfKAv2_hmExtractor>();
-    if (name == "Full_Threats") return std::make_unique<Full_ThreatsExtractor>();
+    if (name == "HalfKAv2_hm")
+        return std::make_unique<HalfKAv2_hmExtractor>();
+    if (name == "Full_Threats")
+        return std::make_unique<Full_ThreatsExtractor>();
     return nullptr;
 }
 
@@ -383,12 +377,14 @@ static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 
     // Check for "+" composition
     std::vector<std::unique_ptr<IFeatureExtractor>> components;
-    std::size_t start = 0;
-    while (start < name.size()) {
-        auto pos = name.find('+', start);
+    std::size_t                                     start = 0;
+    while (start < name.size())
+    {
+        auto pos  = name.find('+', start);
         auto part = name.substr(start, pos == std::string_view::npos ? pos : pos - start);
-        auto ext = make_single_extractor(part);
-        if (!ext) {
+        auto ext  = make_single_extractor(part);
+        if (!ext)
+        {
             std::cerr << "Unknown feature component: " << part << std::endl;
             return nullptr;
         }
@@ -396,21 +392,20 @@ static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
         start = (pos == std::string_view::npos) ? name.size() : pos + 1;
     }
 
-    if (components.empty()) return nullptr;
-    if (components.size() == 1) {
+    if (components.empty())
+        return nullptr;
+    if (components.size() == 1)
+    {
         return std::shared_ptr<IFeatureExtractor>(std::move(components[0]));
     }
     return std::make_shared<ComposedFeatureExtractor>(std::move(components));
 }
 
-// ============================================================
-// SparseBatch (de-templatized, uses IFeatureExtractor)
-// ============================================================
-
 struct SparseBatch {
     static constexpr bool IS_BATCH = true;
 
-    SparseBatch(const IFeatureExtractor& feature_set, const std::vector<TrainingDataEntry>& entries) {
+    SparseBatch(const IFeatureExtractor&              feature_set,
+                const std::vector<TrainingDataEntry>& entries) {
         num_inputs          = feature_set.inputs();
         size                = entries.size();
         max_active_features = feature_set.max_active_features();
@@ -482,12 +477,10 @@ struct SparseBatch {
 
     void fill_features(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
         const int offset = i * max_active_features;
-        num_active_white_features += fs.fill_features_sparse(
-                                       e, white + offset, white_values + offset, Color::White)
-                                       .first;
-        num_active_black_features += fs.fill_features_sparse(
-                                       e, black + offset, black_values + offset, Color::Black)
-                                       .first;
+        num_active_white_features +=
+          fs.fill_features_sparse(e, white + offset, white_values + offset, Color::White).first;
+        num_active_black_features +=
+          fs.fill_features_sparse(e, black + offset, black_values + offset, Color::Black).first;
     }
 };
 
@@ -512,16 +505,12 @@ struct Stream: AnyStream {
     std::unique_ptr<training_data::BasicSfenInputStream> m_stream;
 };
 
-// ============================================================
-// FeaturedBatchStream (de-templatized, uses shared_ptr<IFeatureExtractor>)
-// ============================================================
-
 struct FeaturedBatchStream: Stream<SparseBatch> {
     using BaseType = Stream<SparseBatch>;
 
     static constexpr int num_feature_threads_per_reading_thread = 2;
 
-    FeaturedBatchStream(std::shared_ptr<IFeatureExtractor>             feature_set,
+    FeaturedBatchStream(std::shared_ptr<IFeatureExtractor>            feature_set,
                         int                                           concurrency,
                         const std::vector<std::string>&               filenames,
                         int                                           batch_size,
@@ -624,15 +613,15 @@ struct FeaturedBatchStream: Stream<SparseBatch> {
 
    private:
     std::shared_ptr<IFeatureExtractor> m_feature_set;
-    int                     m_batch_size;
-    int                     m_concurrency;
-    std::deque<SparseBatch*> m_batches;
-    std::mutex              m_batch_mutex;
-    std::mutex              m_stream_mutex;
-    std::condition_variable m_batches_not_full;
-    std::condition_variable m_batches_any;
-    std::atomic_bool        m_stop_flag;
-    std::atomic_int         m_num_workers;
+    int                                m_batch_size;
+    int                                m_concurrency;
+    std::deque<SparseBatch*>           m_batches;
+    std::mutex                         m_batch_mutex;
+    std::mutex                         m_stream_mutex;
+    std::condition_variable            m_batches_not_full;
+    std::condition_variable            m_batches_any;
+    std::atomic_bool                   m_stop_flag;
+    std::atomic_int                    m_num_workers;
 
     std::vector<std::thread> m_workers;
 };
@@ -961,7 +950,8 @@ EXPORT SparseBatch* get_sparse_batch_from_fens(const char*        feature_set_c,
     }
 
     auto feature = get_feature(feature_set_c);
-    if (!feature) return nullptr;
+    if (!feature)
+        return nullptr;
     return new SparseBatch(*feature, entries);
 }
 
@@ -992,8 +982,10 @@ EXPORT Stream<SparseBatch>* CDECL create_sparse_batch_stream(const char*        
     auto filenames_vec = std::vector<std::string>(filenames, filenames + num_files);
 
     auto feature = get_feature(feature_set_c);
-    if (!feature) return nullptr;
-    return new FeaturedBatchStream(std::move(feature), concurrency, filenames_vec, batch_size, cyclic, skipPredicate);
+    if (!feature)
+        return nullptr;
+    return new FeaturedBatchStream(std::move(feature), concurrency, filenames_vec, batch_size,
+                                   cyclic, skipPredicate);
 }
 
 EXPORT void CDECL destroy_sparse_batch_stream(Stream<SparseBatch>* stream) { delete stream; }
@@ -1061,8 +1053,8 @@ int main(int argc, char** argv) {
                                              .pc_y1                = 1.0,
                                              .pc_y2                = 2.0,
                                              .pc_y3                = 1.0};
-    auto stream = create_sparse_batch_stream("Full_Threats+HalfKAv2_hm", concurrency, file_count, files,
-                                             batch_size, cyclic, config);
+    auto stream = create_sparse_batch_stream("Full_Threats+HalfKAv2_hm", concurrency, file_count,
+                                             files, batch_size, cyclic, config);
 
     auto t0 = std::chrono::high_resolution_clock::now();
 
