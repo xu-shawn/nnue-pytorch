@@ -1,35 +1,25 @@
 import argparse
+from collections.abc import Callable
 
 from .halfka_v2_hm import HalfKav2Hm
 from .full_threats import FullThreats
 from .input_feature import InputFeature
 from .composed import ComposedFeatureTransformer, combine_input_features
 
-_FEATURE_COMPONENTS: dict[str, type] = {
+_FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
     "Full_Threats": FullThreats,
 }
 
-_FEATURES: dict[str, type] = {
-    "HalfKAv2_hm^": combine_input_features(HalfKav2Hm),
-    "Full_Threats": combine_input_features(FullThreats),
-}
 
-
-def get_feature_cls(name: str) -> type:
-    if name in _FEATURES:
-        return _FEATURES[name]
-
-    if "+" in name:
-        parts = name.split("+")
-        components = [_FEATURE_COMPONENTS[p] for p in parts]
-        return combine_input_features(*components)
-
-    raise KeyError(f"Unknown feature '{name}'. Available: {', '.join(_FEATURES)}")
+def get_feature_cls(name: str) -> Callable[[int], ComposedFeatureTransformer]:
+    parts = name.split("+")
+    components = [_FEATURE_COMPONENTS[p] for p in parts]
+    return combine_input_features(*components)
 
 
 def get_available_features() -> list[str]:
-    return list(_FEATURES.keys())
+    return list(_FEATURE_COMPONENTS.keys())
 
 
 def add_feature_args(parser: argparse.ArgumentParser) -> None:
