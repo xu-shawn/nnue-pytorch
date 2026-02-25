@@ -51,8 +51,3 @@ class FullThreats(InputFeature):
         self.weight.data.clamp_(
             quantization.min_threat_weight, quantization.max_threat_weight
         )
-
-    @staticmethod
-    def halfka_psqts() -> list[int]:
-        """Threats have no PSQT values."""
-        return [0] * 60144
