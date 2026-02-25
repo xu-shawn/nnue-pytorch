@@ -2,7 +2,7 @@ from .callbacks import WeightClippingCallback
 from .config import ModelConfig, LossParams
 from .lightning_module import NNUE
 from .model import NNUEModel
-from .modules import add_feature_args, get_feature_cls, get_available_features
+from .modules import add_feature_args, get_feature_cls, get_available_features, combine_input_features
 from .quantize import QuantizationConfig
 from .utils import (
     load_model,
@@ -18,6 +18,7 @@ __all__ = [
     "add_feature_args",
     "get_feature_cls",
     "get_available_features",
+    "combine_input_features",
     "NNUE",
     "NNUEModel",
     "QuantizationConfig",
