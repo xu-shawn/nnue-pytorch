@@ -11,7 +11,6 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
-from ..modules import get_feature_cls
 from ..quantize import QuantizationConfig
 
 
@@ -225,10 +224,9 @@ class NNUEReader:
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
-        feature_cls = get_feature_cls(feature_name)
-        self.read_header(feature_cls.HASH, fc_hash)
+        self.read_header(self.model.feature_hash, fc_hash)
         self.read_int32(
-            feature_cls.HASH ^ (self.config.L1 * 2)
+            self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.read_feature_transformer(self.model.input, self.model.num_psqt_buckets)
 

@@ -98,42 +98,11 @@ class ComposedFeatureTransformer(nn.Module):
             f.clip_weights(quantization)
 
 
-def combine_input_features(*feature_classes: type) -> type:
-    """Return a factory class that creates a ComposedFeatureTransformer.
+def combine_input_features(*feature_classes: type):
+    """Return a factory that creates a ComposedFeatureTransformer."""
 
-    The returned class has correct class-level attributes (HASH, NUM_INPUTS,
-    FEATURE_NAME, etc.) so it can be used as a drop-in replacement for a
-    single feature class in model.py.
-    """
-    num_inputs = sum(cls.NUM_INPUTS for cls in feature_classes)
-    max_active = sum(cls.MAX_ACTIVE_FEATURES for cls in feature_classes)
-    num_real = sum(cls.NUM_REAL_FEATURES for cls in feature_classes)
+    def factory(num_outputs: int) -> ComposedFeatureTransformer:
+        features = [fc(num_outputs) for fc in feature_classes]
+        return ComposedFeatureTransformer(features)
 
-    feature_name = "+".join(cls.FEATURE_NAME for cls in feature_classes)
-    input_feature_name = "+".join(
-        cls.INPUT_FEATURE_NAME for cls in feature_classes
-    )
-
-    # Compute combined hash
-    h = 0
-    for cls in feature_classes:
-        h = ((h << 1) | (h >> 31)) & 0xFFFFFFFF
-        h ^= cls.HASH
-    combined_hash = h
-
-    class CombinedFeature:
-        HASH = combined_hash
-        FEATURE_NAME = feature_name
-        INPUT_FEATURE_NAME = input_feature_name
-        NUM_INPUTS = num_inputs
-        MAX_ACTIVE_FEATURES = max_active
-        NUM_REAL_FEATURES = num_real
-
-        def __new__(cls, num_outputs: int) -> ComposedFeatureTransformer:
-            features = [fc(num_outputs) for fc in feature_classes]
-            return ComposedFeatureTransformer(features)
-
-    CombinedFeature.__name__ = f"Combined_{'_'.join(c.__name__ for c in feature_classes)}"
-    CombinedFeature.__qualname__ = CombinedFeature.__name__
-
-    return CombinedFeature
+    return factory
