@@ -166,7 +166,7 @@ constexpr ThreatOffsetTable threatoffsets  = threatfeaturecalc.table;
 constexpr int               threatfeatures = threatfeaturecalc.totalfeatures;
 static_assert(threatfeatures == 60144);
 
-struct Threats {
+struct FullThreats {
     static constexpr std::string_view NAME = "Full_Threats";
 
     static constexpr int SQUARE_NB           = 64;
@@ -306,14 +306,14 @@ struct Threats {
     }
 };
 
-struct Full_ThreatsExtractor: IFeatureExtractor {
-    int inputs() const override { return Threats::INPUTS; }
-    int max_active_features() const override { return Threats::MAX_ACTIVE_FEATURES; }
+struct FullThreatsExtractor: IFeatureExtractor {
+    int inputs() const override { return FullThreats::INPUTS; }
+    int max_active_features() const override { return FullThreats::MAX_ACTIVE_FEATURES; }
     std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
                                              int*                     features,
                                              float*                   values,
                                              Color                    color) const override {
-        return Threats::fill_features_sparse(e, features, values, color);
+        return FullThreats::fill_features_sparse(e, features, values, color);
     }
 };
 
@@ -366,16 +366,11 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
     if (name == "HalfKAv2_hm")
         return std::make_unique<HalfKAv2_hmExtractor>();
     if (name == "Full_Threats")
-        return std::make_unique<Full_ThreatsExtractor>();
+        return std::make_unique<FullThreatsExtractor>();
     return nullptr;
 }
 
 static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
-    // Strip trailing ^ if present
-    if (!name.empty() && name.back() == '^')
-        name = name.substr(0, name.size() - 1);
-
-    // Check for "+" composition
     std::vector<std::unique_ptr<IFeatureExtractor>> components;
     std::size_t                                     start = 0;
     while (start < name.size())
@@ -394,10 +389,10 @@ static std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 
     if (components.empty())
         return nullptr;
+
     if (components.size() == 1)
-    {
         return std::shared_ptr<IFeatureExtractor>(std::move(components[0]));
-    }
+
     return std::make_shared<ComposedFeatureExtractor>(std::move(components));
 }
 
