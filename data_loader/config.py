@@ -4,31 +4,92 @@ from dataclasses import dataclass
 
 @dataclass
 class DataloaderSkipConfig:
-    filtered: bool = True
-    """If disabled, no smart fen skipping will be done."""
-    wld_filtered: bool = True
-    """If disabled, no WLD-based fen skipping will be done."""
+    filtered: bool = False
     random_fen_skipping: int = 0
-    """Skip a random fraction of positions. 0 = disabled."""
+    wld_filtered: bool = False
     early_fen_skipping: int = -1
-    """Skip positions from the start of the game. -1 = disabled."""
     simple_eval_skipping: int = -1
-    """Skip positions based on simple eval. -1 = disabled."""
     param_index: int = 0
-    """Indexing for parameter scans."""
     pc_y1: float = 1.0
-    """Piecewise quadratic interpolation y1 parameter."""
     pc_y2: float = 2.0
-    """Piecewise quadratic interpolation y2 parameter."""
     pc_y3: float = 1.0
-    """Piecewise quadratic interpolation y3 parameter."""
+
+    @staticmethod
+    def add_dataloader_skip_args(parser):
+        parser.add_argument(
+            "--no-smart-fen-skipping",
+            action="store_true",
+            dest="no_smart_fen_skipping",
+            help="If used then no smart fen skipping will be done. By default smart fen skipping is done.",
+        )
+
+        parser.add_argument(
+            "--random-fen-skipping",
+            default=3,
+            type=int,
+            dest="random_fen_skipping",
+            help="skip fens randomly on average random_fen_skipping before using one.",
+        )
+
+        parser.add_argument(
+            "--no-wld-fen-skipping",
+            action="store_true",
+            dest="no_wld_fen_skipping",
+            help="If used then no wld fen skipping will be done. By default wld fen skipping is done.",
+        )
+
+        parser.add_argument(
+            "--early-fen-skipping",
+            type=int,
+            default=-1,
+            dest="early_fen_skipping",
+            help="Skip n plies from the start.",
+        )
+
+        parser.add_argument(
+            "--simple-eval-skipping",
+            type=int,
+            default=-1,
+            dest="simple_eval_skipping",
+            help="Skip positions that have abs(simple_eval(pos)) < n",
+        )
+
+        parser.add_argument(
+            "--param-index",
+            type=int,
+            default=0,
+            dest="param_index",
+            help="Indexing for parameter scans.",
+        )
+
+        parser.add_argument(
+            "--pc-y1",
+            type=float,
+            default=1.0,
+            dest="pc_y1",
+            help="piece count parameter y1 (default=1.0)",
+        )
+        parser.add_argument(
+            "--pc-y2",
+            type=float,
+            default=2.0,
+            dest="pc_y2",
+            help="piece count parameter y2 (default=2.0)",
+        )
+        parser.add_argument(
+            "--pc-y3",
+            type=float,
+            default=1.0,
+            dest="pc_y3",
+            help="piece count parameter y3 (default=1.0)",
+        )
 
     @staticmethod
     def get_dataloader_skip_config_from_args(args) -> "DataloaderSkipConfig":
         return DataloaderSkipConfig(
-            filtered=args.filtered,
+            filtered=not args.no_smart_fen_skipping,
             random_fen_skipping=args.random_fen_skipping,
-            wld_filtered=args.wld_filtered,
+            wld_filtered=not args.no_wld_fen_skipping,
             early_fen_skipping=args.early_fen_skipping,
             simple_eval_skipping=args.simple_eval_skipping,
             param_index=args.param_index,
@@ -36,12 +97,6 @@ class DataloaderSkipConfig:
             pc_y2=args.pc_y2,
             pc_y3=args.pc_y3,
         )
-
-
-@dataclass
-class DataloaderDDPConfig:
-    rank: int = 0
-    world_size: int = 1
 
 
 class CDataloaderSkipConfig(ctypes.Structure):
@@ -68,17 +123,4 @@ class CDataloaderSkipConfig(ctypes.Structure):
             pc_y1=config.pc_y1,
             pc_y2=config.pc_y2,
             pc_y3=config.pc_y3,
-        )
-
-
-class CDataloaderDDPConfig(ctypes.Structure):
-    _fields_ = [
-        ("rank", ctypes.c_int),
-        ("world_size", ctypes.c_int),
-    ]
-
-    def __init__(self, config: DataloaderDDPConfig):
-        super().__init__(
-            rank=config.rank,
-            world_size=config.world_size,
         )

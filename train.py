@@ -1,3 +1,4 @@
+import argparse
 import time
 import warnings
 import os
@@ -13,9 +14,6 @@ from lightning.pytorch.callbacks import TQDMProgressBar, Callback, ModelCheckpoi
 
 import data_loader
 import model as M
-import tyro
-
-from config import TrainingConfig
 
 warnings.filterwarnings("ignore", ".*does not have many workers.*")
 
@@ -91,69 +89,192 @@ def make_data_loaders(
     return train, val
 
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "y", "1"):
+        return True
+    elif v.lower() in ("no", "false", "f", "n", "0"):
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Boolean value expected.")
+
+
+def flatten_once(lst):
+    return sum(lst, [])
+
+
 def main():
-    args = tyro.cli(TrainingConfig)
+    parser = argparse.ArgumentParser(description="Trains the network.")
+    parser.add_argument(
+        "datasets",
+        action="append",
+        nargs="+",
+        help="Training datasets (.binpack). Interleaved at chunk level if multiple specified. Same data is used for training and validation if not validation data is specified.",
+    )
+    parser.add_argument(
+        "--default_root_dir",
+        type=str,
+        default=None,
+        dest="default_root_dir",
+        help="Default root directory for logs and checkpoints. Default: None (use current directory).",
+    )
+    parser.add_argument(
+        "--gpus",
+        type=str,
+        default=None,
+        dest="gpus",
+        help="List of gpus to use, e.g. 0,1,2,3 for 4 gpus. Default: None (use all available gpus).",
+    )
+    parser.add_argument(
+        "--max_epochs",
+        default=800,
+        type=int,
+        dest="max_epochs",
+        help="Maximum number of epochs to train for. Default 800.",
+    )
+    parser.add_argument(
+        "--max_time",
+        default="30:00:00:00",
+        type=str,
+        dest="max_time",
+        help="The maximum time to train for. A string in the format DD:HH:MM:SS (Default 30:00:00:00).",
+    )
+    parser.add_argument(
+        "--validation-data",
+        type=str,
+        action="append",
+        nargs="+",
+        dest="validation_datasets",
+        help="Validation data to use for validation instead of the training data.",
+    )
 
-    datasets = args.datasets
-    val_datasets = args.validation_datasets
+    parser.add_argument(
+        "--gamma",
+        default=0.992,
+        type=float,
+        dest="gamma",
+        help="Multiplicative factor applied to the learning rate after every epoch.",
+    )
+    parser.add_argument(
+        "--lr", default=8.75e-4, type=float, dest="lr", help="Initial learning rate."
+    )
+    parser.add_argument(
+        "--num-workers",
+        default=1,
+        type=int,
+        dest="num_workers",
+        help="Number of worker threads to use for data loading. Currently only works well for binpack.",
+    )
+    parser.add_argument(
+        "--batch-size",
+        default=-1,
+        type=int,
+        dest="batch_size",
+        help="Number of positions per batch / per iteration. Default on GPU = 8192 on CPU = 128.",
+    )
+    parser.add_argument(
+        "--threads",
+        default=-1,
+        type=int,
+        dest="threads",
+        help="Number of torch threads to use. Default automatic (cores) .",
+    )
+    parser.add_argument(
+        "--compile-backend",
+        default="inductor",
+        choices=["inductor", "cudagraphs"],
+        type=str,
+        dest="compile_backend",
+        help="Which backend to use for torch.compile. inductor works well with larger nets, cudagraphs with smaller nets",
+    )
+    parser.add_argument(
+        "--seed", default=42, type=int, dest="seed", help="torch seed to use."
+    )
+    parser.add_argument(
+        "--smart-fen-skipping",
+        action="store_true",
+        dest="smart_fen_skipping_deprecated",
+        help="If enabled positions that are bad training targets will be skipped during loading. Default: True, kept for backwards compatibility. This option is ignored",
+    )
 
-    for dataset in datasets:
+    data_loader.DataloaderSkipConfig.add_dataloader_skip_args(parser)
+
+    parser.add_argument(
+        "--resume-from-model",
+        dest="resume_from_model",
+        help="Initializes training using the weights from the given .pt model",
+    )
+    parser.add_argument(
+        "--resume-from-checkpoint",
+        dest="resume_from_checkpoint",
+        help="Initializes training using a given .ckpt model",
+    )
+    parser.add_argument(
+        "--network-save-period",
+        type=int,
+        default=20,
+        dest="network_save_period",
+        help="Number of epochs between network snapshots. None to disable.",
+    )
+    parser.add_argument(
+        "--save-last-network",
+        type=str2bool,
+        default=True,
+        dest="save_last_network",
+        help="Whether to always save the last produced network.",
+    )
+    parser.add_argument(
+        "--epoch-size",
+        type=int,
+        default=100000000,
+        dest="epoch_size",
+        help="Number of positions per epoch.",
+    )
+    parser.add_argument(
+        "--validation-size",
+        type=int,
+        default=0,
+        dest="validation_size",
+        help="Number of positions per validation step.",
+    )
+
+    M.LossParams.add_loss_args(parser)
+    M.ModelConfig.add_model_args(parser)
+    M.add_feature_args(parser)
+
+    args = parser.parse_args()
+
+    args.datasets = flatten_once(args.datasets)
+    if args.validation_datasets:
+        args.validation_datasets = flatten_once(args.validation_datasets)
+    else:
+        args.validation_datasets = []
+
+    for dataset in args.datasets:
         if not os.path.exists(dataset):
             raise Exception("{0} does not exist".format(dataset))
 
-    for val_dataset in val_datasets:
+    for val_dataset in args.validation_datasets:
         if not os.path.exists(val_dataset):
             raise Exception("{0} does not exist".format(val_dataset))
 
-    train_datasets = datasets
+    train_datasets = args.datasets
     val_datasets = train_datasets
+    if len(args.validation_datasets) > 0:
+        val_datasets = args.validation_datasets
 
     if (args.start_lambda is not None) != (args.end_lambda is not None):
         raise Exception(
             "Either both or none of start_lambda and end_lambda must be specified."
         )
 
-    global_batch_size_requested = args.batch_size
-    if global_batch_size_requested <= 0:
-        global_batch_size_requested = 16384
-    # temporarily default to using only device 0 if user didn't specify --gpus
-    # doing this so that batch size is consistent since if we rely on "auto" behavior
-    # we don't know at this point in the code what the world size is.
-    # TODO: refactor initialization so that we can support default behavior of "auto" with proper batch sizing
-    if args.gpus:
-        try:
-            devices = [int(x) for x in args.gpus.rstrip(",").split(",") if x]
-        except ValueError:
-            print(
-                f"Invalid --gpus argument: '{args.gpus}'. "
-                "Expected a comma separated list of ints, e.g. 0,1",
-                file=sys.stderr,
-            )
-            return
-    else:
-        devices = [0]
-    n_devices = len(devices)
-    if n_devices == 0:
-        print(
-            f"Invalid --gpus argument: '{args.gpus}'. "
-            "Expected a comma separated list of ints, e.g. 0,1",
-            file=sys.stderr,
-        )
-        return
-    if global_batch_size_requested % n_devices != 0:
-        raise ValueError(
-            f"--batch-size {global_batch_size_requested} must be divisible by number of gpus ({n_devices}). "
-            f"Got --gpus={args.gpus or '0'}"
-        )
-    per_gpu_batch_size = global_batch_size_requested // n_devices
-    print(
-        f"batch_size(global)={global_batch_size_requested} | n_devices={n_devices} | batch_size(per_gpu)={per_gpu_batch_size}",
-        flush=True,
-    )
+    batch_size = args.batch_size
+    if batch_size <= 0:
+        batch_size = 16384
+    print("Using batch size {}".format(batch_size))
 
-    feature_cls = M.get_feature_cls(args.features)
-    feature_name = feature_cls.FEATURE_NAME
-    input_feature_name = feature_cls.INPUT_FEATURE_NAME
+    feature_name = args.features
 
     loss_params = M.LossParams.get_loss_params_from_args(args)
     print("Loss parameters:")
@@ -165,9 +286,7 @@ def main():
             feature_name=feature_name,
             loss_params=loss_params,
             max_epoch=max_epoch,
-            num_batches_per_epoch=max(
-                1, args.epoch_size // global_batch_size_requested
-            ),
+            num_batches_per_epoch=args.epoch_size / batch_size,
             gamma=args.gamma,
             lr=args.lr,
             param_index=args.param_index,
@@ -184,17 +303,16 @@ def main():
             )
         nnue.loss_params = loss_params
         nnue.max_epoch = max_epoch
-        nnue.num_batches_per_epoch = max(
-            1, args.epoch_size // global_batch_size_requested
-        )
+        nnue.num_batches_per_epoch = args.epoch_size / batch_size
         # we can set the following here just like that because when resuming
         # from .pt the optimizer is only created after the training is started
         nnue.gamma = args.gamma
         nnue.lr = args.lr
         nnue.param_index = args.param_index
 
+    input_feature_name = nnue.model.input_feature_name
     print("Feature set: {}".format(feature_name))
-    print("Num inputs: {}".format(feature_cls.NUM_INPUTS))
+    print("Num inputs: {}".format(nnue.model.input.NUM_INPUTS))
 
     print("Training with: {}".format(train_datasets))
     print("Validating with: {}".format(val_datasets))
@@ -202,8 +320,8 @@ def main():
     L.seed_everything(args.seed)
     print("Seed {}".format(args.seed))
 
-    print("Smart fen skipping: {}".format(args.filtered))
-    print("WLD fen skipping: {}".format(args.wld_filtered))
+    print("Smart fen skipping: {}".format(not args.no_smart_fen_skipping))
+    print("WLD fen skipping: {}".format(not args.no_wld_fen_skipping))
     print("Random fen skipping: {}".format(args.random_fen_skipping))
     print("Skip early plies: {}".format(args.early_fen_skipping))
     print("Skip simple eval : {}".format(args.simple_eval_skipping))
@@ -230,16 +348,13 @@ def main():
         save_top_k=-1,
     )
 
-    # PL hack, undo slurm cluster detection which is broken for us. 'force interactive mode'
-    # see lightning/fabric/plugins/environments/slurm.py near line 110
-    os.environ["SLURM_JOB_NAME"] = "bash"
-
     trainer = L.Trainer(
         default_root_dir=logdir,
         max_epochs=args.max_epochs,
         accelerator="cuda",
-        strategy="ddp" if len(devices) > 1 else "auto",
-        devices=devices,
+        devices=[int(x) for x in args.gpus.rstrip(",").split(",") if x]
+        if args.gpus
+        else "auto",
         logger=tb_logger,
         callbacks=[
             checkpoint_callback,
@@ -255,13 +370,13 @@ def main():
 
     nnue = torch.compile(nnue, backend=args.compile_backend)
 
-    print("Using C++ data loader", flush=True)
+    print("Using C++ data loader")
     train, val = make_data_loaders(
         train_datasets,
         val_datasets,
         input_feature_name,
         args.num_workers,
-        per_gpu_batch_size,
+        batch_size,
         data_loader.DataloaderSkipConfig.get_dataloader_skip_config_from_args(args),
         args.epoch_size,
         args.validation_size,

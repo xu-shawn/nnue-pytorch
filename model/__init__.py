@@ -6,7 +6,7 @@ from .modules import (
     add_feature_args,
     get_feature_cls,
     get_available_features,
-    FeatureConfig,
+    combine_input_features,
 )
 from .quantize import QuantizationConfig
 from .utils import (
@@ -21,9 +21,9 @@ __all__ = [
     "ModelConfig",
     "LossParams",
     "add_feature_args",
-    "FeatureConfig",
     "get_feature_cls",
     "get_available_features",
+    "combine_input_features",
     "NNUE",
     "NNUEModel",
     "QuantizationConfig",

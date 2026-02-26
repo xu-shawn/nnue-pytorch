@@ -6,10 +6,12 @@ from .feature_transformer import (
 from .features import (
     HalfKav2Hm,
     FullThreats,
+    InputFeature,
+    ComposedFeatureTransformer,
+    combine_input_features,
     get_feature_cls,
     get_available_features,
     add_feature_args,
-    FeatureConfig,
 )
 from .layer_stacks import LayerStacks
 
@@ -19,9 +21,11 @@ __all__ = [
     "FeatureTransformer",
     "HalfKav2Hm",
     "FullThreats",
+    "InputFeature",
+    "ComposedFeatureTransformer",
+    "combine_input_features",
     "get_feature_cls",
     "get_available_features",
     "add_feature_args",
-    "FeatureConfig",
     "LayerStacks",
 ]
