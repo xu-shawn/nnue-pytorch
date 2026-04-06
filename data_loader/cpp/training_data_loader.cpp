@@ -29,10 +29,10 @@ static Square orient_flip_2(Color color, Square sq, Square ksq) {
 struct HalfKAv2_hm {
     static constexpr std::string_view NAME = "HalfKAv2_hm";
 
-    static constexpr int NUM_SQ     = 64;
-    static constexpr int NUM_PT     = 12;
-    static constexpr int NUM_PLANES = NUM_SQ * NUM_PT;
-    static constexpr int INPUTS     = NUM_PLANES * NUM_SQ / 2;
+    static constexpr int NUM_SQ              = 64;
+    static constexpr int NUM_PT              = 12;
+    static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_SQ / 2;
     static constexpr int MAX_ACTIVE_FEATURES = 32;
 
     // clang-format off
@@ -55,13 +55,15 @@ struct HalfKAv2_hm {
              + KingBuckets[static_cast<int>(o_ksq)] * NUM_PLANES;
     }
 
-    static std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, float* values, Color color) {
         auto& pos    = e.pos;
         auto  pieces = pos.piecesBB();
         auto  ksq    = pos.kingSquare(color);
 
         int j = 0;
-        for (Square sq : pieces) {
+        for (Square sq : pieces)
+        {
             auto p      = pos.pieceAt(sq);
             values[j]   = 1.0f;
             features[j] = feature_index(color, ksq, sq, p);
@@ -100,22 +102,27 @@ constexpr auto threatfeaturecalc = []() {
     Piece piecetbl[12] = {whitePawn, blackPawn, whiteKnight, blackKnight, whiteBishop, blackBishop,
                           whiteRook, blackRook, whiteQueen,  blackQueen,  whiteKing,   blackKing};
 
-    for (int c = 0; c < 2; c++) {
-        for (int pt = 0; pt < 6; pt++) {
+    for (int c = 0; c < 2; c++)
+    {
+        for (int pt = 0; pt < 6; pt++)
+        {
             int piece        = 2 * pt + c;
             t[piece][65]     = pieceoffset;
             int squareoffset = 0;
-            for (int from = (int) a1; from <= (int) h8; from++) {
+            for (int from = (int) a1; from <= (int) h8; from++)
+            {
                 t[piece][from] = squareoffset;
-                if (piecetbl[piece].type() != PieceType::Pawn) {
+                if (piecetbl[piece].type() != PieceType::Pawn)
+                {
                     Bitboard attacks = pseudo_attacks[piecetbl[piece].type()][Square(from)];
                     squareoffset += attacks.count();
                 }
-                else if (from >= (int) a2 && from <= (int) h7) {
+                else if (from >= (int) a2 && from <= (int) h7)
+                {
                     Bitboard attacks =
                       bb::pawnAttacks(Bitboard::square(Square(from)), piecetbl[piece].color());
-                    int push = piecetbl[piece].color() == Color::White ? 8 : -8;
-                    Bitboard s = Bitboard::square(Square(from + push));
+                    int      push = piecetbl[piece].color() == Color::White ? 8 : -8;
+                    Bitboard s    = Bitboard::square(Square(from + push));
                     attacks |= s;
                     squareoffset += attacks.count();
                 }
@@ -142,7 +149,7 @@ struct FullThreats {
 
     static constexpr int INPUTS = threatfeatures;  // 60,720
 
-        // clang-format off
+    // clang-format off
     static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
       { a1, a1, a1, a1, h1, h1, h1, h1,
         a1, a1, a1, a1, h1, h1, h1, h1,
@@ -177,26 +184,32 @@ struct FullThreats {
         bool enemy = (attkr.color() != attkd.color());
         from       = (Square) (int(from) ^ (int) OrientTBL[(int) Perspective][(int) ksq]);
         to         = (Square) (int(to) ^ (int) OrientTBL[(int) Perspective][(int) ksq]);
-        if (Perspective == Color::Black) {
+        if (Perspective == Color::Black)
+        {
             attkr = Piece::fromId((int) attkr ^ 1);
             attkd = Piece::fromId((int) attkd ^ 1);
         }
         if ((map[(int) attkr.type()][(int) attkd.type()] < 0)
             || (attkr.type() == attkd.type() && (enemy || attkr.type() != PieceType::Pawn)
-                && from < to)) {
+                && from < to))
+        {
             return -1;
         }
         Bitboard attacks = (attkr.type() == PieceType::Pawn)
                            ? bb::pawnAttacks(Bitboard::square(Square(from)), attkr.color())
                            : bb::detail::pseudoAttacks()[attkr.type()][Square(from)];
-        if (attkr.type() == PieceType::Pawn) {
-            if (attkr.color() == Color::White) {
+        if (attkr.type() == PieceType::Pawn)
+        {
+            if (attkr.color() == Color::White)
+            {
                 attacks |= Bitboard::square(Square(int(from) + 8));
-            } else {
+            }
+            else
+            {
                 attacks |= Bitboard::square(Square(int(from) - 8));
             }
         }
-        Bitboard upto    = Bitboard::square(to);
+        Bitboard upto = Bitboard::square(to);
         return int(threatoffsets[(int) attkr][65]
                    + (int(attkd.color()) * (numvalidtargets[(int) attkr] / 2)
                       + map[(int) attkr.type()][(int) attkd.type()])
@@ -212,58 +225,71 @@ struct FullThreats {
         auto  ksq         = pos.kingSquare(color);
         Color order[2][2] = {{Color::White, Color::Black}, {Color::Black, Color::White}};
         int   k           = 0;
-        for (int i = (int) Color::White; i <= (int) Color::Black; i++) {
-            for (int j = (int) PieceType::Pawn; j <= (int) PieceType::King; j++) {
+        for (int i = (int) Color::White; i <= (int) Color::Black; i++)
+        {
+            for (int j = (int) PieceType::Pawn; j <= (int) PieceType::King; j++)
+            {
                 Color     c     = order[(int) color][i];
                 PieceType pt    = PieceType(j);
                 Piece     attkr = Piece(pt, c);
                 Bitboard  bb    = pos.piecesBB(attkr);
-                if (pt == PieceType::Pawn) {
+                if (pt == PieceType::Pawn)
+                {
                     auto right         = (c == Color::White) ? Offset(1, 1) : Offset(-1, -1);
                     auto left          = (c == Color::White) ? Offset(-1, 1) : Offset(1, -1);
                     auto push          = (c == Color::White) ? Offset(0, 1) : Offset(0, -1);
                     auto attacks_left  = bb.shifted(right) & pieces;
                     auto attacks_right = bb.shifted(left) & pieces;
-                    auto attacks_forward = bb.shifted(push) & (pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn));
-                    for (Square to : attacks_left) {
+                    auto attacks_forward =
+                      bb.shifted(push) & (pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn));
+                    for (Square to : attacks_left)
+                    {
                         Square from  = Square((int) to - (c == Color::White ? 9 : -9));
                         Piece  attkd = pos.pieceAt(to);
                         int    index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index >= 0) {
+                        if (index >= 0)
+                        {
                             values[k]   = 1.0f;
                             features[k] = index;
                             k++;
                         }
                     }
-                    for (Square to : attacks_right) {
+                    for (Square to : attacks_right)
+                    {
                         Square from  = Square((int) to - (c == Color::White ? 7 : -7));
                         Piece  attkd = pos.pieceAt(to);
                         int    index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index >= 0) {
+                        if (index >= 0)
+                        {
                             values[k]   = 1.0f;
                             features[k] = index;
                             k++;
                         }
                     }
-                    for (Square to : attacks_forward) {
+                    for (Square to : attacks_forward)
+                    {
                         Square from  = Square((int) to - (c == Color::White ? 8 : -8));
                         Piece  attkd = pos.pieceAt(to);
                         int    index = threat_index(color, attkr, from, to, attkd, ksq);
-                        if (index >= 0) {
+                        if (index >= 0)
+                        {
                             values[k]   = 1.0f;
                             features[k] = index;
                             k++;
                         }
                     }
-
                 }
-                else {
-                    for (Square from : bb) {
+                else
+                {
+                    for (Square from : bb)
+                    {
                         Bitboard attacks = pos.attacks(from) & pieces;
-                        for (Square to : attacks) {
+                        for (Square to : attacks)
+                        {
                             Piece attkd = pos.pieceAt(to);
                             int   index = threat_index(color, attkr, from, to, attkd, ksq);
-                            if (index >= 0) {
+                            if (index >= 0)
+                            {
                                 values[k]   = 1.0f;
                                 features[k] = index;
                                 k++;
@@ -284,6 +310,23 @@ struct FullThreatsExtractor: IFeatureExtractor {
                                              int*                     features,
                                              float*                   values,
                                              Color                    color) const override {
+        return FullThreats::fill_features_sparse(e, features, values, color);
+    }
+};
+
+struct RandomFullThreatsExtractor: IFeatureExtractor {
+    int inputs() const override { return FullThreats::INPUTS; }
+    int max_active_features() const override { return FullThreats::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
+                                             int*                     features,
+                                             float*                   values,
+                                             Color                    color) const override {
+        std::bernoulli_distribution dist{0.5};
+        auto&                       prng = rng::get_thread_local_rng();
+
+        if (dist(prng))
+            return {0, FullThreats::INPUTS};
+
         return FullThreats::fill_features_sparse(e, features, values, color);
     }
 };
@@ -336,6 +379,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<HalfKAv2_hmExtractor>();
     if (name == "Full_Threats")
         return std::make_unique<FullThreatsExtractor>();
+    if (name == "Random_Full_Threats")
+        return std::make_unique<RandomFullThreatsExtractor>();
     return nullptr;
 }
 
@@ -375,7 +420,8 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
                          const std::vector<TrainingDataEntry>& entries)
 #ifdef NNUE_LOADER_STATISTICS
-        : entries_copy(entries)
+    :
+    entries_copy(entries)
 #endif
 {
     num_inputs          = feature_set.inputs();
@@ -394,17 +440,17 @@ SparseBatch::SparseBatch(const IFeatureExtractor&              feature_set,
     num_active_white_features = 0;
     num_active_black_features = 0;
 
-        for (int i = 0; i < size * max_active_features; ++i)
-            white[i] = -1;
-        for (int i = 0; i < size * max_active_features; ++i)
-            black[i] = -1;
-        for (int i = 0; i < size * max_active_features; ++i)
-            white_values[i] = 0.0f;
-        for (int i = 0; i < size * max_active_features; ++i)
-            black_values[i] = 0.0f;
+    for (int i = 0; i < size * max_active_features; ++i)
+        white[i] = -1;
+    for (int i = 0; i < size * max_active_features; ++i)
+        black[i] = -1;
+    for (int i = 0; i < size * max_active_features; ++i)
+        white_values[i] = 0.0f;
+    for (int i = 0; i < size * max_active_features; ++i)
+        black_values[i] = 0.0f;
 
-        for (int i = 0; i < size; ++i)
-            fill_entry(feature_set, i, entries[i]);
+    for (int i = 0; i < size; ++i)
+        fill_entry(feature_set, i, entries[i]);
 }
 
 SparseBatch::~SparseBatch() {
@@ -430,32 +476,39 @@ void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingD
 
 void SparseBatch::fill_features(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     const int offset = i * max_active_features;
-        num_active_white_features +=
-          fs.fill_features_sparse(e, white + offset, white_values + offset, Color::White).first;
-        num_active_black_features +=
-          fs.fill_features_sparse(e, black + offset, black_values + offset, Color::Black).first;
+    num_active_white_features +=
+      fs.fill_features_sparse(e, white + offset, white_values + offset, Color::White).first;
+    num_active_black_features +=
+      fs.fill_features_sparse(e, black + offset, black_values + offset, Color::Black).first;
 }
 
 int FeaturedBatchStream::calculate_num_reader_threads(int concurrency) {
-        if (worker_thread_ratio >= 1) return 1;
-        return std::max(1, concurrency - calculate_num_worker_threads(concurrency));
+    if (worker_thread_ratio >= 1)
+        return 1;
+    return std::max(1, concurrency - calculate_num_worker_threads(concurrency));
 }
 
 int FeaturedBatchStream::calculate_num_worker_threads(int concurrency) {
-        if (worker_thread_ratio <= 0) return 1;
-        return std::max(1, static_cast<int>(std::floor(concurrency * worker_thread_ratio)));
+    if (worker_thread_ratio <= 0)
+        return 1;
+    return std::max(1, static_cast<int>(std::floor(concurrency * worker_thread_ratio)));
 }
 
-FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feature_set,
-                                         int concurrency,
-                                         const std::vector<std::string>& filenames,
-                                         int batch_size,
-                                         bool cyclic,
-                                         std::function<bool(const TrainingDataEntry&)> skipPredicate,
-                                         int rank,
-                                         int world_size) :
+FeaturedBatchStream::FeaturedBatchStream(
+  std::shared_ptr<IFeatureExtractor>            feature_set,
+  int                                           concurrency,
+  const std::vector<std::string>&               filenames,
+  int                                           batch_size,
+  bool                                          cyclic,
+  std::function<bool(const TrainingDataEntry&)> skipPredicate,
+  int                                           rank,
+  int                                           world_size) :
     BaseType(calculate_num_reader_threads(concurrency),
-             filenames, cyclic, skipPredicate, rank, world_size),
+             filenames,
+             cyclic,
+             skipPredicate,
+             rank,
+             world_size),
     m_feature_set(std::move(feature_set)),
     m_concurrency(concurrency),
     m_batch_size(batch_size),
@@ -467,11 +520,13 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
         std::vector<TrainingDataEntry> entries;
         entries.reserve(m_batch_size);
 
-        while (!m_stop_flag.load()) {
+        while (!m_stop_flag.load())
+        {
             entries.clear();
             {
                 BaseType::m_stream->fill_threadsafe(entries, m_batch_size);
-                if (entries.empty()) break;
+                if (entries.empty())
+                    break;
             }
 
             auto batch = new SparseBatch(*m_feature_set, entries);
@@ -491,7 +546,8 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
     };
 
     const int num_worker_threads = calculate_num_worker_threads(concurrency);
-    for (int i = 0; i < num_worker_threads; ++i) {
+    for (int i = 0; i < num_worker_threads; ++i)
+    {
         m_workers.emplace_back(worker);
     }
 }
@@ -499,16 +555,20 @@ FeaturedBatchStream::FeaturedBatchStream(std::shared_ptr<IFeatureExtractor> feat
 FeaturedBatchStream::~FeaturedBatchStream() {
     m_stop_flag.store(true);
     m_batches_not_full.notify_all();
-    for (auto& worker : m_workers) {
-        if (worker.joinable()) worker.join();
+    for (auto& worker : m_workers)
+    {
+        if (worker.joinable())
+            worker.join();
     }
-    for (auto& batch : m_batches) delete batch;
+    for (auto& batch : m_batches)
+        delete batch;
 }
 
 SparseBatch* FeaturedBatchStream::next() {
     std::unique_lock lock(m_batch_mutex);
     m_batches_any.wait(lock, [this]() { return !m_batches.empty() || m_num_workers.load() == 0; });
-    if (!m_batches.empty()) {
+    if (!m_batches.empty())
+    {
         auto batch = m_batches.front();
         m_batches.pop_front();
         lock.unlock();
@@ -518,14 +578,18 @@ SparseBatch* FeaturedBatchStream::next() {
     return nullptr;
 }
 
-Fen::Fen() : m_fen(nullptr) {}
+Fen::Fen() :
+    m_fen(nullptr) {}
 
-Fen::Fen(const std::string& fen) : m_size(fen.size()), m_fen(new char[fen.size() + 1]) {
+Fen::Fen(const std::string& fen) :
+    m_size(fen.size()),
+    m_fen(new char[fen.size() + 1]) {
     std::memcpy(m_fen, fen.c_str(), fen.size() + 1);
 }
 
 Fen& Fen::operator=(const std::string& fen) {
-    if (m_fen != nullptr) delete[] m_fen;
+    if (m_fen != nullptr)
+        delete[] m_fen;
     m_size = fen.size();
     m_fen  = new char[fen.size() + 1];
     std::memcpy(m_fen, fen.c_str(), fen.size() + 1);
@@ -535,31 +599,39 @@ Fen& Fen::operator=(const std::string& fen) {
 Fen::~Fen() { delete[] m_fen; }
 
 FenBatch::FenBatch(const std::vector<TrainingDataEntry>& entries) :
-    m_size(entries.size()), m_fens(new Fen[entries.size()]) {
-    for (int i = 0; i < m_size; ++i) m_fens[i] = entries[i].pos.fen();
+    m_size(entries.size()),
+    m_fens(new Fen[entries.size()]) {
+    for (int i = 0; i < m_size; ++i)
+        m_fens[i] = entries[i].pos.fen();
 }
 
 FenBatch::~FenBatch() { delete[] m_fens; }
 
 int FenBatchStream::calculate_num_reader_threads(int concurrency) {
-        if (worker_thread_ratio >= 1) return 1;
-        return std::max(1, concurrency - calculate_num_worker_threads(concurrency));
+    if (worker_thread_ratio >= 1)
+        return 1;
+    return std::max(1, concurrency - calculate_num_worker_threads(concurrency));
 }
 
 int FenBatchStream::calculate_num_worker_threads(int concurrency) {
-        if (worker_thread_ratio <= 0) return 1;
-        return std::max(1, static_cast<int>(std::floor(concurrency * worker_thread_ratio)));
+    if (worker_thread_ratio <= 0)
+        return 1;
+    return std::max(1, static_cast<int>(std::floor(concurrency * worker_thread_ratio)));
 }
 
-FenBatchStream::FenBatchStream(int concurrency,
-                               const std::vector<std::string>& filenames,
-                               int batch_size,
-                               bool cyclic,
+FenBatchStream::FenBatchStream(int                                           concurrency,
+                               const std::vector<std::string>&               filenames,
+                               int                                           batch_size,
+                               bool                                          cyclic,
                                std::function<bool(const TrainingDataEntry&)> skipPredicate,
-                               int rank,
-                               int world_size) :
+                               int                                           rank,
+                               int                                           world_size) :
     BaseType(calculate_num_reader_threads(concurrency),
-             filenames, cyclic, skipPredicate, rank, world_size),
+             filenames,
+             cyclic,
+             skipPredicate,
+             rank,
+             world_size),
     m_concurrency(concurrency),
     m_batch_size(batch_size),
     m_num_workers(calculate_num_worker_threads(concurrency)) {
@@ -570,11 +642,13 @@ FenBatchStream::FenBatchStream(int concurrency,
         std::vector<TrainingDataEntry> entries;
         entries.reserve(m_batch_size);
 
-        while (!m_stop_flag.load()) {
+        while (!m_stop_flag.load())
+        {
             entries.clear();
             {
                 BaseType::m_stream->fill_threadsafe(entries, m_batch_size);
-                if (entries.empty()) break;
+                if (entries.empty())
+                    break;
             }
 
             auto batch = new FenBatch(entries);
@@ -594,7 +668,8 @@ FenBatchStream::FenBatchStream(int concurrency,
     };
 
     const int num_worker_threads = calculate_num_worker_threads(concurrency);
-    for (int i = 0; i < num_worker_threads; ++i) {
+    for (int i = 0; i < num_worker_threads; ++i)
+    {
         m_workers.emplace_back(worker);
     }
 }
@@ -602,16 +677,20 @@ FenBatchStream::FenBatchStream(int concurrency,
 FenBatchStream::~FenBatchStream() {
     m_stop_flag.store(true);
     m_batches_not_full.notify_all();
-    for (auto& worker : m_workers) {
-        if (worker.joinable()) worker.join();
+    for (auto& worker : m_workers)
+    {
+        if (worker.joinable())
+            worker.join();
     }
-    for (auto& batch : m_batches) delete batch;
+    for (auto& batch : m_batches)
+        delete batch;
 }
 
 FenBatch* FenBatchStream::next() {
     std::unique_lock lock(m_batch_mutex);
     m_batches_any.wait(lock, [this]() { return !m_batches.empty() || m_num_workers.load() == 0; });
-    if (!m_batches.empty()) {
+    if (!m_batches.empty())
+    {
         auto batch = m_batches.front();
         m_batches.pop_front();
         lock.unlock();
@@ -622,8 +701,11 @@ FenBatch* FenBatchStream::next() {
 }
 
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
-    if (config.filtered || config.random_fen_skipping || config.wld_filtered || config.early_fen_skipping) {
-        return [config, prob = double(config.random_fen_skipping) / (config.random_fen_skipping + 1)](const TrainingDataEntry& e) {
+    if (config.filtered || config.random_fen_skipping || config.wld_filtered
+        || config.early_fen_skipping)
+    {
+        return [config, prob = double(config.random_fen_skipping)
+                             / (config.random_fen_skipping + 1)](const TrainingDataEntry& e) {
             static constexpr int VALUE_NONE = 32002;
 
             auto desired_piece_count_weights = [&config](int pc) -> double {
@@ -647,24 +729,31 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
             auto do_wld_skip = [&]() {
                 std::bernoulli_distribution distrib(1.0 - e.score_result_prob());
-                auto& prng = rng::get_thread_local_rng();
+                auto&                       prng = rng::get_thread_local_rng();
                 return distrib(prng);
             };
 
             auto do_skip = [&]() {
                 std::bernoulli_distribution distrib(prob);
-                auto& prng = rng::get_thread_local_rng();
+                auto&                       prng = rng::get_thread_local_rng();
                 return distrib(prng);
             };
 
             auto do_filter = [&]() { return (e.isCapturingMove() || e.isInCheck()); };
 
-            if (e.score == VALUE_NONE) return true;
-            if (e.ply <= config.early_fen_skipping) return true;
-            if (config.random_fen_skipping && do_skip()) return true;
-            if (config.filtered && do_filter()) return true;
-            if (config.wld_filtered && do_wld_skip()) return true;
-            if (config.simple_eval_skipping > 0 && std::abs(e.pos.simple_eval()) < config.simple_eval_skipping) return true;
+            if (e.score == VALUE_NONE)
+                return true;
+            if (e.ply <= config.early_fen_skipping)
+                return true;
+            if (config.random_fen_skipping && do_skip())
+                return true;
+            if (config.filtered && do_filter())
+                return true;
+            if (config.wld_filtered && do_wld_skip())
+                return true;
+            if (config.simple_eval_skipping > 0
+                && std::abs(e.pos.simple_eval()) < config.simple_eval_skipping)
+                return true;
 
             const int pc = e.pos.piecesBB().count();
             piece_count_history_all[pc] += 1;
@@ -672,30 +761,36 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
             double desired_piece_count_weights_total = [&desired_piece_count_weights]() {
                 double tot = 0;
-                for (int i = 0; i < 33; i++) tot += desired_piece_count_weights(i);
+                for (int i = 0; i < 33; i++)
+                    tot += desired_piece_count_weights(i);
                 return tot;
             }();
 
             // update alpha, which scales the filtering probability, to a maximum rate.
-            if (uint64_t(piece_count_history_all_total) % 10000 == 0) {
+            if (uint64_t(piece_count_history_all_total) % 10000 == 0)
+            {
                 double pass = piece_count_history_all_total * desired_piece_count_weights_total;
-                for (int i = 0; i < 33; ++i) {
-                    if (desired_piece_count_weights(pc) > 0) {
+                for (int i = 0; i < 33; ++i)
+                {
+                    if (desired_piece_count_weights(pc) > 0)
+                    {
                         double tmp =
                           piece_count_history_all_total * desired_piece_count_weights(pc)
                           / (desired_piece_count_weights_total * piece_count_history_all[pc]);
                         if (tmp < pass)
-                        pass = tmp;
+                            pass = tmp;
                     }
                 }
                 alpha = 1.0 / (pass * max_skipping_rate);
             }
 
-            double tmp = alpha * piece_count_history_all_total * desired_piece_count_weights(pc) / (desired_piece_count_weights_total * piece_count_history_all[pc]);
+            double tmp = alpha * piece_count_history_all_total * desired_piece_count_weights(pc)
+                       / (desired_piece_count_weights_total * piece_count_history_all[pc]);
             tmp = std::min(1.0, tmp);
             std::bernoulli_distribution distrib(1.0 - tmp);
-            auto& prng = rng::get_thread_local_rng();
-            if (distrib(prng)) return true;
+            auto&                       prng = rng::get_thread_local_rng();
+            if (distrib(prng))
+                return true;
 
             piece_count_history_passed[pc] += 1;
             piece_count_history_passed_total += 1;
