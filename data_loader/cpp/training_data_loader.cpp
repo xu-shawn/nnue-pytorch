@@ -1006,6 +1006,16 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
             return true;
         }
 
+        // Pawn Count Filter (hardcoded: keep 60% of pawnless positions, rising linearly to 100% at 16 pawns)
+        const int    pawns = (e.pos.piecesBB(whitePawn) | e.pos.piecesBB(blackPawn)).count();
+        const double pawn_accept_prob = std::min(1.0, 0.6 + 0.4 * pawns / 16.0);
+        uint64_t     pawn_reject_threshold =
+          static_cast<uint64_t>((1.0 - pawn_accept_prob) * static_cast<double>(~0ULL));
+        if (prng() < pawn_reject_threshold)
+        {
+            return true;
+        }
+
         pc_history_passed[pc] += 1.0;
         pc_history_passed_total += 1.0;
 
