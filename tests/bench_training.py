@@ -110,17 +110,26 @@ class CachedBatches:
 
 
 class ProfiledLoader:
-    def __init__(self, loader):
+    def __init__(self, loader, warmup, profile):
         self.loader = loader
+        self.warmup = warmup
+        self.profile = profile
+        self.wait_seconds = []
 
     def __len__(self):
         return len(self.loader)
 
     def __iter__(self):
         iterator = iter(self.loader)
-        for _ in range(len(self)):
-            with torch.profiler.record_function("next_batch"):
+        for i in range(len(self)):
+            start = time.perf_counter()
+            if self.profile:
+                with torch.profiler.record_function("next_batch"):
+                    batch = next(iterator)
+            else:
                 batch = next(iterator)
+            if i >= self.warmup:
+                self.wait_seconds.append(time.perf_counter() - start)
             yield batch
 
 
@@ -203,8 +212,8 @@ def main():
                 torch.save([tuple(t.cpu() for t in b) for b in batches], cache)
         loader = CachedBatches(batches, total_steps)
     torch.cuda.reset_peak_memory_stats()
+    loader = ProfiledLoader(loader, args.warmup, args.profile)
     if profiler is not None:
-        loader = ProfiledLoader(loader)
         profiler.start()
     trainer.fit(loader)
     if not math.isfinite(trainer.callback_metrics["train_loss_epoch"]):
@@ -217,6 +226,18 @@ def main():
     if world > 1:
         dist.all_reduce(elapsed, op=dist.ReduceOp.MAX)
     elapsed = elapsed.cpu().tolist()
+    waits = sorted(loader.wait_seconds)
+    wait_stats = {
+        "rank": rank,
+        "mean_ms": statistics.mean(waits) * 1000,
+        "p95_ms": waits[int(0.95 * (len(waits) - 1))] * 1000,
+        "max_ms": max(waits) * 1000,
+    }
+    rank_wait_stats = [None] * world
+    if world > 1:
+        dist.all_gather_object(rank_wait_stats, wait_stats)
+    else:
+        rank_wait_stats[0] = wait_stats
     result = {
         "args": vars(args), "world_size": world,
         "source": source_metadata(),
@@ -227,6 +248,7 @@ def main():
         "nccl_environment": {k: v for k, v in os.environ.items() if k.startswith("NCCL_")},
         "gpu": torch.cuda.get_device_name(),
         "window_seconds": elapsed,
+        "host_next_batch_wait": rank_wait_stats,
         "iterations_per_second": [args.steps / t for t in elapsed],
         "profile_overhead_in_window": 0 if args.profile else None,
         "positions_per_second": [args.batch_size * args.steps / t for t in elapsed],
