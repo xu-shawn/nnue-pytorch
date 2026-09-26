@@ -1,0 +1,16 @@
+[
+  {
+    "repo": "vondele/master-binpacks_relabel",
+    "file": "wrongIsRight_nodes5000pv2.relabel-BT4-tf13tune.binpack",
+    "size": 7800748146,
+    "sha256": "4c897e0e5be95fb68882507b5ce2674c83ce3e7807b2478fef350d2a1bf4c2e3",
+    "seconds": 265.19646739959717
+  },
+  {
+    "repo": "xushawn/test80-bt4-relabel",
+    "file": "test80-2024-02-feb-2tb7p.min-v2.v6.relabel.binpack",
+    "size": 8362996228,
+    "sha256": "b1cfe2ad9aff0034835925621c0840c76f1e93b3088689743431e5ef20df8828",
+    "seconds": 268.0202429294586
+  }
+]
