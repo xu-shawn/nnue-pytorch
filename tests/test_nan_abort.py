@@ -43,6 +43,19 @@ def test_inf_train_loss_stops_training():
     assert callback.nan_detected
 
 
+def test_deferred_check_remembers_nonfinite_loss():
+    trainer = _make_trainer()
+    trainer.log_every_n_steps = 4
+    trainer.num_training_batches = 4
+    callback = TerminateOnNaN()
+    for i, loss in enumerate([float("nan"), 1.0, 1.0, 1.0]):
+        callback.on_train_batch_end(
+            trainer, batch_idx=i, outputs={"loss": torch.tensor(loss)}
+        )
+        assert trainer.should_stop == (i == 3)
+    assert callback.nan_detected
+
+
 def test_nan_validation_loss_stops_training():
     trainer = _make_trainer()
     callback = TerminateOnNaN()
