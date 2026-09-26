@@ -6,11 +6,13 @@ Use --cached to isolate compute with a ring of real, rank-sharded batches.
 """
 
 import argparse
+import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import statistics
+import subprocess
 import sys
 import time
 
@@ -20,6 +22,7 @@ import torch
 import torch.distributed as dist
 
 from data_loader.config import DataloaderSkipConfig
+from data_loader._native import c_lib
 from model import NNUE
 from model.config import LambdaConfig, LossParams, ModelConfig, NNUELightningConfig
 from model.optimizers.config import OptimizerConfig
@@ -49,6 +52,22 @@ def threats_config():
             ),
         ),
     )
+
+
+def source_metadata():
+    root = Path(__file__).resolve().parents[1]
+    paths = [
+        "model/nnue.py", "trainer/engine.py", "trainer/callbacks.py",
+        "model/modules/feature_transformer/fused_ft_kernel.py",
+        "tests/bench_training.py",
+    ]
+    hashes = {p: hashlib.sha256((root / p).read_bytes()).hexdigest() for p in paths}
+    library = Path(c_lib.dll._name)
+    hashes["loader_library"] = hashlib.sha256(library.read_bytes()).hexdigest()
+    revision = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True,
+    )
+    return {"revision": revision.stdout.strip() or None, "sha256": hashes}
 
 
 class Timing:
@@ -134,7 +153,7 @@ def main():
     torch.manual_seed(42)
     torch._dynamo.config.cache_size_limit = 64
     device = torch.device("cuda", local)
-    model = NNUE(config=threats_config(), max_epoch=4750, num_batches_per_epoch=1024)
+    model = NNUE(config=threats_config(), max_epoch=4500, num_batches_per_epoch=1024)
     if args.compile_backend != "eager":
         model.model = torch.compile(model.model, backend=args.compile_backend)
     optimizer, schedulers = _normalize_optimizer_and_schedulers(model.configure_optimizers())
@@ -200,9 +219,16 @@ def main():
     elapsed = elapsed.cpu().tolist()
     result = {
         "args": vars(args), "world_size": world,
+        "source": source_metadata(),
         "torch": torch.__version__, "cuda": torch.version.cuda,
+        "nccl": torch.cuda.nccl.version(),
+        "cpu_affinity_rank0": sorted(os.sched_getaffinity(0)),
+        "float32_matmul_precision": torch.get_float32_matmul_precision(),
+        "nccl_environment": {k: v for k, v in os.environ.items() if k.startswith("NCCL_")},
         "gpu": torch.cuda.get_device_name(),
         "window_seconds": elapsed,
+        "iterations_per_second": [args.steps / t for t in elapsed],
+        "profile_overhead_in_window": 0 if args.profile else None,
         "positions_per_second": [args.batch_size * args.steps / t for t in elapsed],
         "median_step_ms": statistics.median(elapsed) * 1000 / args.steps,
         "losses_rank0": timing.losses,
