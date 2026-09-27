@@ -35,9 +35,10 @@ def _reference(layer, x, indices, quantize=False):
 @pytest.mark.parametrize("batch", [1, 17, 257])
 @pytest.mark.parametrize("concentrated", [False, True])
 @pytest.mark.parametrize("quantize", [False, True])
-def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize, monkeypatch):
+@pytest.mark.parametrize("outputs", [16, 32, 48, 64, 128])
+def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize, outputs, monkeypatch):
     torch.manual_seed(123)
-    layer = FactorizedStackedLinear(width, 32, 8, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
+    layer = FactorizedStackedLinear(width, outputs, 8, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
     # Strided all-zero, dense and 75%-zero inputs; uneven/empty buckets and partial tiles.
     storage = torch.randn(batch, width, 2, device="cuda")
     zero_fraction = {1: 1.0, 17: 0.0, 257: 0.75}[batch]
@@ -46,7 +47,7 @@ def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize,
     indices = torch.randint(0, 8, (batch, 1), device="cuda", dtype=torch.int32)
     if concentrated:
         indices.fill_(7)
-    upstream = torch.randn(batch, 32, device="cuda")
+    upstream = torch.randn(batch, outputs, device="cuda")
     parameters = tuple(layer.parameters())
     optimized = Mock(wraps=grouped_l1)
     monkeypatch.setattr(stacked_linear, "grouped_l1", optimized)
@@ -70,6 +71,12 @@ def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize,
         assert torch.count_nonzero(gradients[0][x == 0]) > 0
 
 
+@pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
+@pytest.mark.parametrize("outputs", [1, 17, 31, 33, 63, 65, 96, 127])
+def test_grouped_partial_output_tiles(outputs, monkeypatch):
+    test_grouped_forward_and_all_gradients(1024, 17, False, False, outputs, monkeypatch)
+
+
 @pytest.mark.parametrize("device", [
     "cpu",
     pytest.param("cuda", marks=pytest.mark.skipif(not CUDA_AVAILABLE, reason="NVIDIA CUDA required")),
@@ -77,7 +84,7 @@ def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize,
 @pytest.mark.parametrize("case", ["dependencies", "width", "outputs", "buckets", "dtype", "empty", "autocast"])
 def test_grouped_fallback(device, case, monkeypatch):
     width = 264 if case == "width" else 1024
-    outputs = 16 if case == "outputs" else 32
+    outputs = 129 if case == "outputs" else 32
     buckets = 4 if case == "buckets" else 8
     dtype = torch.float64 if case == "dtype" else torch.float32
     batch = 0 if case == "empty" else 3
