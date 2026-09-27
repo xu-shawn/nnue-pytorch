@@ -106,7 +106,8 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
     __syncthreads();
     int n = counts[blockIdx.x];
     for (int i = 0; i < n; ++i) {
-        int id = ids[blockIdx.x * M + i];
+        // Form the row offset in pointer width before adding column offsets.
+        size_t id = (unsigned)ids[blockIdx.x * M + i];
         unsigned mask = masks[blockIdx.x * M + i];
         float v0 = 0, v1 = 0;
         while (mask) {
