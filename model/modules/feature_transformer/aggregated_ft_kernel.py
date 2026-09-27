@@ -80,7 +80,7 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
                                                  const unsigned *masks, const int *counts,
                                                  float *gw, float *gb, int batch_size) {
     __shared__ float g[2 * T][(2*B)];
-    int tid = threadIdx.x, col = tid + B * blockIdx.y;
+    unsigned tid = threadIdx.x, col = tid + B * blockIdx.y;
     float bias0 = 0, bias1 = 0;
     for (int t = 0; t < T; ++t) {
         int row = blockIdx.x * T + t;
@@ -109,10 +109,12 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
         // Form the row offset in pointer width before adding column offsets.
         size_t id = (unsigned)ids[blockIdx.x * M + i];
         unsigned mask = masks[blockIdx.x * M + i];
-        float v0 = 0, v1 = 0;
-        while (mask) {
-            int r = __ffs(mask) - 1;
-            mask &= mask - 1;
+        // Packed masks are nonempty; avoid an add-to-zero and a loop
+        // iteration for the common case of a single contributing row.
+        int r = __ffs(mask) - 1;
+        float v0 = g[r][tid], v1 = g[r][tid + B];
+        while ((mask &= mask - 1)) {
+            r = __ffs(mask) - 1;
             v0 += g[r][tid];
             v1 += g[r][tid + B];
         }
