@@ -2,8 +2,9 @@
 
 Pack the union of features in eight positions with a position/perspective mask.
 Each column block sums those contributions before issuing global FP32 atomics.
-A repeated index within one perspective requires multiplicity, so those tiles
-fall back to individual scatters. No sparsity approximation is used.
+Feature indices must be unique within each position/perspective, as guaranteed
+by the feature extractors. Repeated indices across rows are aggregated exactly
+apart from floating-point rounding.
 """
 
 from functools import cache
@@ -30,10 +31,9 @@ extern "C" __global__ void ft_pack_features(const int *w, const int *b, int *ids
     extern __shared__ unsigned mem[];
     int *keys = (int *)mem;
     unsigned *bits = mem + H;
-    __shared__ int n, duplicate;
+    __shared__ int n;
     if (threadIdx.x == 0) {
         n = 0;
-        duplicate = 0;
     }
     for (int i = threadIdx.x; i < H; i += blockDim.x) {
         keys[i] = -1;
@@ -52,29 +52,31 @@ extern "C" __global__ void ft_pack_features(const int *w, const int *b, int *ids
         while (true) {
             int old = atomicCAS(keys + slot, -1, id);
             if (old == -1 || old == id) {
-                unsigned oldbits = atomicOr(bits + slot, 1u << row);
-                if (oldbits & (1u << row))
-                    atomicExch(&duplicate, 1);
+                if (old == -1) {
+                    // Only the thread that claims a new hash slot appends it.
+                    int offset = atomicAdd(&n, 1);
+                    ids[blockIdx.x * M + offset] = slot;
+                }
+                atomicOr(bits + slot, 1u << row);
                 break;
             }
             slot = (slot + 1) & (H - 1);
         }
     }
     __syncthreads();
-    for (int i = threadIdx.x; i < H; i += blockDim.x) {
-        if (keys[i] >= 0) {
-            int offset = atomicAdd(&n, 1);
-            ids[blockIdx.x * M + offset] = keys[i];
-            masks[blockIdx.x * M + offset] = bits[i];
-        }
+    // Resolve the occupied-slot list in place after all masks are complete.
+    for (int i = threadIdx.x; i < n; i += blockDim.x) {
+        int slot = ids[blockIdx.x * M + i];
+        ids[blockIdx.x * M + i] = keys[slot];
+        masks[blockIdx.x * M + i] = bits[slot];
     }
     __syncthreads();
     if (threadIdx.x == 0)
-        counts[blockIdx.x] = duplicate ? -n - 1 : n;
+        counts[blockIdx.x] = n;
 }
 extern "C" __global__ void ft_aggregate_backward(const float *us, const float *them,
                                                  const float *gl, const float *cl, float maxact,
-                                                 const int *w, const int *b, const int *ids,
+                                                 const int *ids,
                                                  const unsigned *masks, const int *counts,
                                                  float *gw, float *gb, int batch_size) {
     __shared__ float g[2 * T][(2*B)];
@@ -103,24 +105,6 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
     }
     __syncthreads();
     int n = counts[blockIdx.x];
-    if (n < 0) {
-        for (int r = 0; r < 2 * T; ++r) {
-            int pos = blockIdx.x * T + r / 2;
-            if (pos >= batch_size)
-                break;
-            const int *row = ((r & 1) ? b : w) + pos * A;
-            float v0 = g[r][tid], v1 = g[r][tid + B];
-            for (int k = 0; k < A; ++k) {
-                int id = row[k];
-                if (id < 0)
-                    break;
-                if (v0 != 0)
-                    atomicAdd(gw + id * K + col, v0);
-                if (v1 != 0)
-                    atomicAdd(gw + id * K + HALF + col, v1);
-            }
-        }
-    }
     for (int i = 0; i < n; ++i) {
         int id = ids[blockIdx.x * M + i];
         unsigned mask = masks[blockIdx.x * M + i];
@@ -155,7 +139,10 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
 def aggregated_ft_backward(
     us, them, white, black, grad, clamped, grad_weight, grad_bias, maxact
 ):
-    """Accumulate into zeroed output gradients on the current PyTorch stream."""
+    """Accumulate into zeroed output gradients on the current PyTorch stream.
+
+    Nonnegative feature indices must be unique within each white/black row.
+    """
     batch_size, active = white.shape
     tiles = (batch_size + 7) // 8
     with cp.cuda.Device(us.device.index):
@@ -177,8 +164,6 @@ def aggregated_ft_backward(
             grad.data_ptr(),
             clamped.data_ptr(),
             np.float32(maxact),
-            white.data_ptr(),
-            black.data_ptr(),
             ids.data_ptr(),
             masks.data_ptr(),
             counts.data_ptr(),
@@ -187,5 +172,5 @@ def aggregated_ft_backward(
             np.int32(batch_size),
         )
         with cp.cuda.ExternalStream(torch.cuda.current_stream(us.device).cuda_stream):
-            pack((tiles,), (256,), pack_args, shared_mem=shared_bytes)
+            pack((tiles,), (512,), pack_args, shared_mem=shared_bytes)
             aggregate((tiles, grad.shape[1] // (2 * threads)), (threads,), backward_args)
