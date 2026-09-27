@@ -96,7 +96,7 @@ class SimpleTrainer:
         world_size: int,
         local_rank: int,
         ddp_bucket_cap_mb: int = 50,
-        mixed_precision: bool = True,
+        mixed_precision: bool = False,
     ):
         if ddp_bucket_cap_mb <= 0:
             raise ValueError("ddp_bucket_cap_mb must be positive.")
