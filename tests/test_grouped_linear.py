@@ -11,7 +11,8 @@ from model.modules import stacked_linear
 from model.modules.stacked_linear import FactorizedStackedLinear, grouped_l1
 from model.quantize import QuantizationConfig, QuantizationManager
 
-CUDA_AVAILABLE = torch.cuda.is_available() and torch.version.hip is None
+GPU_AVAILABLE = torch.cuda.is_available()
+CUDA_AVAILABLE = GPU_AVAILABLE and torch.version.hip is None
 OPTIMIZED_AVAILABLE = (
     CUDA_AVAILABLE
     and grouped_l1 is not None
@@ -37,16 +38,28 @@ def _reference(layer, x, indices, quantize=False):
 @pytest.mark.parametrize("quantize", [False, True])
 @pytest.mark.parametrize("outputs", [16, 32, 48, 64, 128])
 def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize, outputs, monkeypatch):
+    _check_forward_and_all_gradients(width, batch, concentrated, quantize, outputs, 8, monkeypatch)
+
+
+def _check_forward_and_all_gradients(width, batch, concentrated, quantize, outputs, count, monkeypatch):
     torch.manual_seed(123)
-    layer = FactorizedStackedLinear(width, outputs, 8, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
+    layer = FactorizedStackedLinear(width, outputs, count, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
+    # Distinct bucket weights catch incorrect routing/strides, unlike the
+    # identical initial weights used by StackedLinear.
+    with torch.no_grad():
+        layer.linear.weight.normal_(std=0.02)
+        layer.linear.bias.normal_(std=0.02)
+        layer.factorized_linear.weight.normal_(std=0.02)
+        layer.factorized_linear.bias.normal_(std=0.02)
     # Strided all-zero, dense and 75%-zero inputs; uneven/empty buckets and partial tiles.
     storage = torch.randn(batch, width, 2, device="cuda")
     zero_fraction = {1: 1.0, 17: 0.0, 257: 0.75}[batch]
     storage[..., 0].masked_fill_(torch.rand(batch, width, device="cuda") < zero_fraction, 0)
     x = storage[..., 0].detach().requires_grad_()
-    indices = torch.randint(0, 8, (batch, 1), device="cuda", dtype=torch.int32)
+    indices = torch.randint(0, count, (batch, 1), device="cuda", dtype=torch.int32)
+    indices[-1] = count - 1
     if concentrated:
-        indices.fill_(7)
+        indices.fill_(count - 1)
     upstream = torch.randn(batch, outputs, device="cuda")
     parameters = tuple(layer.parameters())
     optimized = Mock(wraps=grouped_l1)
@@ -77,15 +90,40 @@ def test_grouped_partial_output_tiles(outputs, monkeypatch):
     test_grouped_forward_and_all_gradients(1024, 17, False, False, outputs, monkeypatch)
 
 
+@pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
+@pytest.mark.parametrize("count", [1, 3, 4, 16, 32, 256])
+@pytest.mark.parametrize("concentrated", [False, True])
+@pytest.mark.parametrize("quantize", [False, True])
+def test_grouped_variable_stack_count(count, concentrated, quantize, monkeypatch):
+    _check_forward_and_all_gradients(1024, 257, concentrated, quantize, 32, count, monkeypatch)
+
+
+@pytest.mark.skipif(not GPU_AVAILABLE or grouped_l1 is None, reason="GPU, CuPy and Triton required")
+def test_grouped_router_switches_stack_count():
+    from model.modules.grouped_linear import _route_rows
+
+    # Revisit a specialization after using another count; several CUDA blocks
+    # must agree on the offsets. Bucket zero is deliberately left empty.
+    for count in (8, 3, 256, 1, 8, 3):
+        indices = (torch.arange(1025, device="cuda") % max(1, count - 1) + (count > 1)).long()
+        rows, counts = _route_rows(indices, count)
+        assert rows.shape == (count, len(indices))
+        torch.testing.assert_close(counts.long(), torch.bincount(indices, minlength=count))
+        for bucket, population in enumerate(counts.tolist()):
+            expected = torch.where(indices == bucket)[0]
+            actual = rows[bucket, :population].long().sort().values
+            torch.testing.assert_close(actual, expected)
+
+
 @pytest.mark.parametrize("device", [
     "cpu",
-    pytest.param("cuda", marks=pytest.mark.skipif(not CUDA_AVAILABLE, reason="NVIDIA CUDA required")),
+    pytest.param("cuda", marks=pytest.mark.skipif(not GPU_AVAILABLE, reason="CUDA or ROCm GPU required")),
 ])
 @pytest.mark.parametrize("case", ["dependencies", "width", "outputs", "buckets", "dtype", "empty", "autocast"])
 def test_grouped_fallback(device, case, monkeypatch):
     width = 264 if case == "width" else 1024
     outputs = 129 if case == "outputs" else 32
-    buckets = 4 if case == "buckets" else 8
+    buckets = 257 if case == "buckets" else 8
     dtype = torch.float64 if case == "dtype" else torch.float32
     batch = 0 if case == "empty" else 3
     layer = FactorizedStackedLinear(width, outputs, buckets, QuantizationManager(QuantizationConfig()), "ls_l1")
@@ -114,10 +152,20 @@ def test_grouped_fallback(device, case, monkeypatch):
     optimized.assert_not_called()
 
 
-def test_grouped_cpu_fallback_compiles():
-    layer = FactorizedStackedLinear(1024, 32, 8, QuantizationManager(QuantizationConfig()), "ls_l1")
-    x = torch.randn(3, 1024, requires_grad=True)
-    indices = torch.tensor([[0], [4], [7]])
+@pytest.mark.parametrize("count", [1, 3, 8, 16])
+@pytest.mark.parametrize("device", [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(
+        not GPU_AVAILABLE or torch.version.hip is None, reason="ROCm GPU required"
+    )),
+])
+def test_grouped_fallback_compiles(count, device):
+    layer = FactorizedStackedLinear(1024, 32, count, QuantizationManager(QuantizationConfig()), "ls_l1").to(device)
+    with torch.no_grad():
+        layer.linear.weight.normal_(std=0.02)
+        layer.linear.bias.normal_(std=0.02)
+    x = torch.randn(3, 1024, device=device, requires_grad=True)
+    indices = torch.tensor([[0], [count // 2], [count - 1]], device=device)
     compiled = torch.compile(layer, backend="aot_eager")
     actual = compiled(x, indices, True)
     expected = _reference(layer, x, indices, True)
