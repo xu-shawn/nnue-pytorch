@@ -88,8 +88,6 @@ class FactorizedStackedLinear(StackedLinear):
         super().__init__(in_features, out_features, count, quantization, layer_key)
 
         self.factorized_linear = nn.Linear(in_features, out_features)
-        self.use_grouped = False
-        self.use_sparse = False
         self.zero_virtual_weights()
 
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor, fake_quantize_weights: bool=False) -> torch.Tensor:
@@ -104,13 +102,23 @@ class FactorizedStackedLinear(StackedLinear):
             merged_weight = self.quantization.fake_quantize_weights(merged_weight, f"{self.layer_key}_weight")
             merged_bias = self.quantization.fake_quantize_weights(merged_bias, f"{self.layer_key}_bias")
 
-        if (getattr(self, "use_grouped", False) and x.is_cuda and x.dtype == torch.float32
-                and self.in_features == 1024 and self.out_features == 32
-                and self.count == 8 and x.shape[0] > 0):
-            if grouped_l1 is None:
-                raise RuntimeError("--grouped-l1 requires CuPy and Triton on CUDA.")
-            return grouped_l1(x, merged_weight, merged_bias, ls_indices,
-                              sparse=getattr(self, "use_sparse", False))
+        # The custom kernels specialize FP32 1024→32 with eight buckets.
+        # Keep the standard path for missing dependencies and other workloads.
+        if (
+            grouped_l1 is not None
+            and x.is_cuda
+            and torch.version.hip is None
+            and x.dtype == merged_weight.dtype == merged_bias.dtype == torch.float32
+            and not torch.is_autocast_enabled()
+            and self.in_features == 1024
+            and self.out_features == 32
+            and self.count == 8
+            and x.ndim == 2
+            and x.shape[0] > 0
+            and x.shape[1] == self.in_features
+            and torch.cuda.get_device_capability(x.device)[0] >= 8
+        ):
+            return grouped_l1(x, merged_weight, merged_bias, ls_indices)
 
         stacked_output = F.linear(x, merged_weight, merged_bias)
 

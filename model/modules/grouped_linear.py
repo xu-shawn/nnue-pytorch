@@ -1,10 +1,11 @@
 """Selected-bucket L1 matmul for the H100 master-net workload.
 
-Only the requested one of eight 1024→32 layers is evaluated. A GPU row map
-allows tiled FP32 matmuls without sorting/copying the large activation tensor or
-reading bucket sizes on the host. Split reductions keep weight gradients
-parallel even when bucket populations differ. Input gradients remain dense:
-fake quantization uses STE, so a quantized zero can have a nonzero derivative.
+Only the requested one of eight 1024→32 layers is evaluated, with NNZ-compacted
+forward. A GPU row map allows tiled FP32 backward matmuls without sorting/copying
+the large activation tensor or reading bucket sizes on the host. Split reductions
+keep weight gradients parallel even when bucket populations differ. Input
+gradients remain dense: fake quantization uses STE, so a quantized zero can have
+a nonzero derivative.
 """
 
 import cupy as cp
@@ -113,51 +114,6 @@ extern "C" __global__ void route(const long long* ids,int* rows,int* counts,int 
         stream=stream,
     )
     return rows, counts
-
-
-@tr.jit
-def _bucketed_forward(
-    X,
-    W,
-    B,
-    R,
-    C,
-    Y,
-    BATCH: tl.constexpr,
-    K: tl.constexpr,
-    N: tl.constexpr,
-    BM: tl.constexpr,
-    BK: tl.constexpr,
-    BN: tl.constexpr,
-):
-    p = tl.program_id(0)
-    bucket = tl.program_id(1)
-    count = tl.load(C + bucket)
-    if p * BM < count:
-        m = p * BM + tl.arange(0, BM)
-        n = tl.arange(0, BN)
-        ki = tl.arange(0, BK)
-        rows = tl.load(R + bucket * BATCH + m, m < count, 0)
-        acc = tl.full((BM, BN), 0, tl.float32)
-        for block in range(tl.cdiv(K, BK)):
-            k = block * BK + ki
-            a = tl.load(
-                X + rows[:, None] * K + k[None, :],
-                (m[:, None] < count) & (k[None, :] < K),
-                0,
-            )
-            w = tl.load(
-                W + (bucket * N + n[None, :]) * K + k[:, None],
-                (n[None, :] < N) & (k[:, None] < K),
-                0,
-            )
-            acc = tl.dot(a, w, acc, input_precision="ieee")
-        bias = tl.load(B + bucket * N + n, n < N, 0)
-        tl.store(
-            Y + rows[:, None] * N + n[None, :],
-            acc + bias[None, :],
-            (m[:, None] < count) & (n[None, :] < N),
-        )
 
 
 @tr.jit
@@ -295,26 +251,6 @@ def _sum_gradient_partials(
         tl.store(B + b * N + i, tl.sum(q, 0), i < N)
 
 
-def _forward(x, w, b, rows, counts, n, bm=32, bk=32):
-    y = torch.empty((len(x), n), device=x.device, dtype=x.dtype)
-    _bucketed_forward[(tr.cdiv(len(x), bm), 8)](
-        x,
-        w,
-        b,
-        rows,
-        counts,
-        y,
-        len(x),
-        x.shape[1],
-        n,
-        bm,
-        bk,
-        max(16, tr.next_power_of_2(n)),
-        num_warps=4,
-    )
-    return y
-
-
 def _input_gradient(g, w, rows, counts, k, bm=32, bk=64):
     out = torch.empty((len(g), k), device=g.device, dtype=g.dtype)
     _bucketed_input_gradient[(tr.cdiv(len(g), bm), tr.cdiv(k, bk), 8)](
@@ -365,15 +301,13 @@ def _weight_and_bias_gradient(x, g, rows, counts, split=8, bm=32, bk=32):
 
 class _GroupedLinear(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, x, weight, bias, indices, sparse):
+    def forward(ctx, x, weight, bias, indices):
         x = x.contiguous()
         weight = weight.contiguous()
         indices = indices.flatten().to(torch.int64).contiguous()
         rows, counts = _route_rows(indices)
         ctx.save_for_backward(x, weight, rows, counts)
-        if sparse:
-            return _sparse_forward(x, weight, bias.contiguous(), indices)
-        return _forward(x, weight, bias.contiguous(), rows, counts, 32, 64, 64)
+        return _sparse_forward(x, weight, bias.contiguous(), indices)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -382,15 +316,15 @@ class _GroupedLinear(torch.autograd.Function):
         # Quantized zero activations still need dense STE input gradients.
         grad_input = _input_gradient(grad_output, weight, rows, counts, 1024, 64, 64)
         grad_weight, grad_bias = _weight_and_bias_gradient(x, grad_output, rows, counts, 16, 32, 32)
-        return grad_input, grad_weight, grad_bias, None, None
+        return grad_input, grad_weight, grad_bias, None
 
 
 @torch.compiler.disable
-def grouped_l1(x, weight, bias, indices, sparse=False):
+def grouped_l1(x, weight, bias, indices):
     """FP32 1024→32 linear for eight buckets; indices must be in [0, 8).
 
     Bucket counts stay on the GPU. Parameters and output row order are identical
     to a dense 1024→256 linear followed by selection. First-order training only,
     as with the custom feature transformer. The caller handles other shapes.
     """
-    return _GroupedLinear.apply(x, weight, bias, indices, sparse)
+    return _GroupedLinear.apply(x, weight, bias, indices)

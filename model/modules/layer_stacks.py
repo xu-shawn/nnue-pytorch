@@ -23,8 +23,6 @@ class LayerStacks(nn.Module):
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
         self.l1 = FactorizedStackedLinear(2 * self.L1 // 2, self.L2, count, quantization, "ls_l1")
-        self.l1.use_grouped = config.grouped_l1 or config.sparse_l1
-        self.l1.use_sparse = config.sparse_l1
         self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
 
         self.output = StackedLinear(self.L2 * 2 + self.L3 * 2, 1, count, quantization, "ls_output")
