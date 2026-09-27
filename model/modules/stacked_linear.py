@@ -102,7 +102,7 @@ class FactorizedStackedLinear(StackedLinear):
             merged_weight = self.quantization.fake_quantize_weights(merged_weight, f"{self.layer_key}_weight")
             merged_bias = self.quantization.fake_quantize_weights(merged_bias, f"{self.layer_key}_bias")
 
-        # The custom kernels specialize FP32 1024→32 with eight buckets.
+        # The custom kernels specialize FP32 K→32 with eight buckets.
         # Keep the standard path for missing dependencies and other workloads.
         if (
             grouped_l1 is not None
@@ -110,7 +110,8 @@ class FactorizedStackedLinear(StackedLinear):
             and torch.version.hip is None
             and x.dtype == merged_weight.dtype == merged_bias.dtype == torch.float32
             and not torch.is_autocast_enabled()
-            and self.in_features == 1024
+            and 128 <= self.in_features <= 4096
+            and self.in_features % 128 == 0
             and self.out_features == 32
             and self.count == 8
             and x.ndim == 2

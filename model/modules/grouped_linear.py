@@ -1,6 +1,6 @@
 """Selected-bucket L1 matmul for the H100 master-net workload.
 
-Only the requested one of eight 1024→32 layers is evaluated, with NNZ-compacted
+Only the requested one of eight K→32 layers is evaluated, with NNZ-compacted
 forward. A GPU row map allows tiled FP32 backward matmuls without sorting/copying
 the large activation tensor or reading bucket sizes on the host. Split reductions
 keep weight gradients parallel even when bucket populations differ. Input
@@ -14,7 +14,7 @@ import triton as tr
 import triton.language as tl
 
 _route = None
-_sparse_forward_kernel = None
+_sparse_forward_kernels = {}
 
 
 def _sparse_forward(x, weight, bias, indices):
@@ -23,10 +23,11 @@ def _sparse_forward(x, weight, bias, indices):
     Four warps split each row's nonzeros. The transpose is included in the
     measured cost; parameter storage and dense STE input gradients stay intact.
     """
-    global _sparse_forward_kernel
-    if _sparse_forward_kernel is None:
-        _sparse_forward_kernel = cp.RawKernel(
-            r"""
+    width = x.shape[1]
+    kernel = _sparse_forward_kernels.get(width)
+    if kernel is None:
+        kernel = cp.RawKernel(
+            f"#define K {width}\n" + r"""
 extern "C" __global__ void sparse_l1_forward(
     const float* x, const float* weight, const float* bias,
     const long long* buckets, float* output
@@ -35,13 +36,13 @@ extern "C" __global__ void sparse_l1_forward(
     const int lane = threadIdx.x % 32;
     const int warp = threadIdx.x / 32;
     const int bucket = buckets[row];
-    __shared__ int nnz, indices[1024];
-    __shared__ float values[1024], partial[4][32];
+    __shared__ int nnz, indices[K];
+    __shared__ float values[K], partial[4][32];
     if (threadIdx.x == 0) nnz = 0;
     __syncthreads();
 
-    for (int k = threadIdx.x; k < 1024; k += 128) {
-        const float value = x[row * 1024 + k];
+    for (int k = threadIdx.x; k < K; k += 128) {
+        const float value = x[row * K + k];
         const unsigned mask = __ballot_sync(0xffffffff, value != 0.0f);
         int base = 0;
         if (lane == 0) base = atomicAdd(&nnz, __popc(mask));
@@ -57,7 +58,7 @@ extern "C" __global__ void sparse_l1_forward(
     float acc = 0.0f;
     for (int i = warp; i < nnz; i += 4) {
         const int k = indices[i];
-        acc = fmaf(values[i], weight[(bucket * 1024 + k) * 32 + lane], acc);
+        acc = fmaf(values[i], weight[(bucket * K + k) * 32 + lane], acc);
     }
     partial[warp][lane] = acc;
     __syncthreads();
@@ -71,10 +72,11 @@ extern "C" __global__ void sparse_l1_forward(
 """,
             "sparse_l1_forward",
         )
-    transposed = weight.reshape(8, 32, 1024).transpose(1, 2).contiguous()
+        _sparse_forward_kernels[width] = kernel
+    transposed = weight.reshape(8, 32, width).transpose(1, 2).contiguous()
     output = torch.empty((len(x), 32), device=x.device, dtype=x.dtype)
     stream = cp.cuda.ExternalStream(torch.cuda.current_stream(x.device).cuda_stream)
-    _sparse_forward_kernel(
+    kernel(
         (len(x),),
         (128,),
         (x.data_ptr(), transposed.data_ptr(), bias.data_ptr(), indices.data_ptr(), output.data_ptr()),
@@ -314,17 +316,17 @@ class _GroupedLinear(torch.autograd.Function):
         x, weight, rows, counts = ctx.saved_tensors
         grad_output = grad_output.contiguous()
         # Quantized zero activations still need dense STE input gradients.
-        grad_input = _input_gradient(grad_output, weight, rows, counts, 1024, 64, 64)
+        grad_input = _input_gradient(grad_output, weight, rows, counts, x.shape[1], 64, 64)
         grad_weight, grad_bias = _weight_and_bias_gradient(x, grad_output, rows, counts, 16, 32, 32)
         return grad_input, grad_weight, grad_bias, None
 
 
 @torch.compiler.disable
 def grouped_l1(x, weight, bias, indices):
-    """FP32 1024→32 linear for eight buckets; indices must be in [0, 8).
+    """FP32 K→32 linear for eight buckets; indices must be in [0, 8).
 
     Bucket counts stay on the GPU. Parameters and output row order are identical
-    to a dense 1024→256 linear followed by selection. First-order training only,
+    to a dense K→256 linear followed by selection. First-order training only,
     as with the custom feature transformer. The caller handles other shapes.
     """
     return _GroupedLinear.apply(x, weight, bias, indices)
