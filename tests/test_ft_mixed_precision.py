@@ -23,6 +23,9 @@ def test_ft_half_buffer_matches_explicit_cast(width, batch):
         black = torch.rand(batch, 64, device="cuda").argsort(dim=1)[:, :17].to(torch.int32).contiguous()
         white[:, 9:] = -1
         black[:, 13:] = -1
+        white[0] = -1
+        black[1] = -1
+        white[2] = black[2] = -1
         weight = (torch.randn(64, width, device="cuda") / 16).requires_grad_()
         bias = torch.full((width,), 0.5, device="cuda", requires_grad=True)
         dy = torch.randn(batch, width, device="cuda") * 1e-5
