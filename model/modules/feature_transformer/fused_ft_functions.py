@@ -86,8 +86,8 @@ class FusedDoubleFtFunction(autograd.Function):
         grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
 
         # Aggregation pays for its feature-union pass on large master-net batches.
-        # Keep the direct scatter for other widths/devices and small batches.
-        if (l1_size == 1024 and batch_size >= 1024 and 0 < max_active_features <= 288
+        # Keep direct scatter for unsupported widths/devices and small batches.
+        if (512 <= l1_size <= 4096 and l1_size % 128 == 0 and batch_size >= 1024 and 0 < max_active_features <= 288
                 and torch.cuda.get_device_capability(us.device) == (9, 0)):
             aggregated_ft_backward(
                 us, them, white_indices, black_indices, grad_l0, clamped_out,

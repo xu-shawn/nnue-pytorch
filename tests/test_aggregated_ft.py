@@ -10,10 +10,11 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
     not torch.cuda.is_available() or not _HAS_CUPY_KERNELS,
     reason="CUDA and CuPy required",
 )
+@pytest.mark.parametrize("width", [1024, 1152, 1280])
 @pytest.mark.parametrize("batch,active", [(1, 33), (17, 288), (1025, 33)])
 @pytest.mark.parametrize("kind", ["empty", "unique", "duplicate"])
 @pytest.mark.parametrize("separate_stream", [False, True])
-def test_aggregated_ft(batch, active, kind, separate_stream):
+def test_aggregated_ft(width, batch, active, kind, separate_stream):
     if torch.cuda.get_device_capability() != (9, 0):
         pytest.skip("H100 specialization")
     from model.modules.feature_transformer.aggregated_ft_kernel import (
@@ -30,10 +31,10 @@ def test_aggregated_ft(batch, active, kind, separate_stream):
             torch.cuda._sleep(2_000_000)
         us, them = torch.randn(batch, 1, 2, device=device).unbind(-1)
         us, them = us.contiguous(), them.contiguous()
-        clamped = torch.rand(batch, 4, 512, device=device)
+        clamped = torch.rand(batch, 4, width // 2, device=device)
         clamped[clamped < 0.2] = 0
         clamped[clamped > 0.8] = 1
-        grad = torch.randn(batch, 1024, device=device)
+        grad = torch.randn(batch, width, device=device)
         white = torch.full((batch, active), -1, dtype=torch.int32, device=device)
         black = torch.full_like(white, -1)
         if kind != "empty":
@@ -56,7 +57,7 @@ def test_aggregated_ft(batch, active, kind, separate_stream):
         db1 = d1 * b0 * ((b1 > 0) & (b1 < 1))
         gw0, gw1 = us * dw0 + them * db0, us * dw1 + them * db1
         gb0, gb1 = them * dw0 + us * db0, them * dw1 + us * db1
-        expected_weight = torch.zeros(512, 1024, device=device)
+        expected_weight = torch.zeros(512, width, device=device)
         for indices, value in [
             (white, torch.cat((gw0, gw1), dim=1)),
             (black, torch.cat((gb0, gb1), dim=1)),

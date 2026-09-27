@@ -14,13 +14,16 @@ import torch
 
 
 @lru_cache(maxsize=None)
-def _kernels(active: int):
+def _kernels(active: int, width: int):
     A = active
+    half = width // 2
+    threads = next(n for n in range(min(128, half), 0, -1) if half % n == 0)
     tile = 8
     maxids = 2 * tile * A
     h = 1 << (maxids - 1).bit_length()
     code = (
         f"#define T {tile}\n#define A {A}\n#define H {h}\n#define M {maxids}\n"
+        f"#define K {width}\n#define HALF {half}\n#define B {threads}\n"
         + r"""
 extern "C" __global__ void ft_pack_features(const int *w, const int *b, int *ids, unsigned *masks,
                                             int *counts, int batch_size) {
@@ -74,16 +77,16 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
                                                  const int *w, const int *b, const int *ids,
                                                  const unsigned *masks, const int *counts,
                                                  float *gw, float *gb, int batch_size) {
-    __shared__ float g[2 * T][256];
-    int tid = threadIdx.x, col = tid + 128 * blockIdx.y;
+    __shared__ float g[2 * T][(2*B)];
+    int tid = threadIdx.x, col = tid + B * blockIdx.y;
     float bias0 = 0, bias1 = 0;
     for (int t = 0; t < T; ++t) {
         int row = blockIdx.x * T + t;
         if (row >= batch_size)
             break;
-        float w0 = cl[row * 2048 + col], w1 = cl[row * 2048 + 512 + col];
-        float b0 = cl[row * 2048 + 1024 + col], b1 = cl[row * 2048 + 1536 + col];
-        float d0 = gl[row * 1024 + col], d1 = gl[row * 1024 + 512 + col];
+        float w0 = cl[row * (2*K) + col], w1 = cl[row * (2*K) + HALF + col];
+        float b0 = cl[row * (2*K) + K + col], b1 = cl[row * (2*K) + (3*HALF) + col];
+        float d0 = gl[row * K + col], d1 = gl[row * K + HALF + col];
         float dw0 = (w0 == 0 || w0 == maxact) ? 0 : d0 * w1;
         float dw1 = (w1 == 0 || w1 == maxact) ? 0 : d0 * w0;
         float db0 = (b0 == 0 || b0 == maxact) ? 0 : d1 * b1;
@@ -92,9 +95,9 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
         float gw0 = u * dw0 + v * db0, gw1 = u * dw1 + v * db1;
         float gb0 = v * dw0 + u * db0, gb1 = v * dw1 + u * db1;
         g[2 * t][tid] = gw0;
-        g[2 * t][tid + 128] = gw1;
+        g[2 * t][tid + B] = gw1;
         g[2 * t + 1][tid] = gb0;
-        g[2 * t + 1][tid + 128] = gb1;
+        g[2 * t + 1][tid + B] = gb1;
         bias0 += gw0 + gb0;
         bias1 += gw1 + gb1;
     }
@@ -106,15 +109,15 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
             if (pos >= batch_size)
                 break;
             const int *row = ((r & 1) ? b : w) + pos * A;
-            float v0 = g[r][tid], v1 = g[r][tid + 128];
+            float v0 = g[r][tid], v1 = g[r][tid + B];
             for (int k = 0; k < A; ++k) {
                 int id = row[k];
                 if (id < 0)
                     break;
                 if (v0 != 0)
-                    atomicAdd(gw + id * 1024 + col, v0);
+                    atomicAdd(gw + id * K + col, v0);
                 if (v1 != 0)
-                    atomicAdd(gw + id * 1024 + 512 + col, v1);
+                    atomicAdd(gw + id * K + HALF + col, v1);
             }
         }
     }
@@ -126,17 +129,17 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
             int r = __ffs(mask) - 1;
             mask &= mask - 1;
             v0 += g[r][tid];
-            v1 += g[r][tid + 128];
+            v1 += g[r][tid + B];
         }
         if (v0 != 0)
-            atomicAdd(gw + id * 1024 + col, v0);
+            atomicAdd(gw + id * K + col, v0);
         if (v1 != 0)
-            atomicAdd(gw + id * 1024 + 512 + col, v1);
+            atomicAdd(gw + id * K + HALF + col, v1);
     }
     if (bias0 != 0)
         atomicAdd(gb + col, bias0);
     if (bias1 != 0)
-        atomicAdd(gb + 512 + col, bias1);
+        atomicAdd(gb + HALF + col, bias1);
 }
 """
     )
@@ -145,7 +148,7 @@ extern "C" __global__ void ft_aggregate_backward(const float *us, const float *t
     pack.max_dynamic_shared_size_bytes = h * 8
     aggregate = cp.RawKernel(code, "ft_aggregate_backward")
     aggregate.compile()
-    return pack, aggregate, maxids, h * 8
+    return pack, aggregate, maxids, h * 8, threads
 
 
 @torch.compiler.disable
@@ -156,7 +159,7 @@ def aggregated_ft_backward(
     batch_size, active = white.shape
     tiles = (batch_size + 7) // 8
     with cp.cuda.Device(us.device.index):
-        pack, aggregate, capacity, shared_bytes = _kernels(active)
+        pack, aggregate, capacity, shared_bytes, threads = _kernels(active, grad.shape[1])
         ids = torch.empty((tiles, capacity), device=us.device, dtype=torch.int32)
         masks = torch.empty_like(ids)
         counts = torch.empty(tiles, device=us.device, dtype=torch.int32)
@@ -185,4 +188,4 @@ def aggregated_ft_backward(
         )
         with cp.cuda.ExternalStream(torch.cuda.current_stream(us.device).cuda_stream):
             pack((tiles,), (256,), pack_args, shared_mem=shared_bytes)
-            aggregate((tiles, 4), (128,), backward_args)
+            aggregate((tiles, grad.shape[1] // (2 * threads)), (threads,), backward_args)
