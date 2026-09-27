@@ -67,7 +67,9 @@ def test_fused_double_ft(l1, batch_size):
         "fused",
     )
 
-    loss_fused = l0_fused.sum()
+    # Distinct upstream gradients catch column-routing errors in tiled kernels.
+    grad_output = torch.randn_like(l0_fused)
+    loss_fused = (l0_fused * grad_output).sum()
     loss_fused.backward()
 
     grad_weight_fused = weight.grad.clone()
@@ -89,7 +91,7 @@ def test_fused_double_ft(l1, batch_size):
         "torch",
     )
 
-    loss_fallback = l0_fallback.sum()
+    loss_fallback = (l0_fallback * grad_output).sum()
     loss_fallback.backward()
 
     # Compare

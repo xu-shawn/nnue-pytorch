@@ -3,10 +3,8 @@ import torch
 
 from .sparse_linear_kernel import _kernel_with_threads
 
-# Thread target for the forward kernel: largest divisor of l1_half
-# that is <= 128 is used. Fewer threads gives each warp more
-# independent accumulator chains; the backward uses one thread per
-# column (l1_half) since it is atomicAdd-contended.
+# General forward target; the measured H100 master-net launch uses 256.
+# Backward has its own launch geometry.
 _FORWARD_THREADS = 128
 
 
@@ -22,7 +20,8 @@ _fused_double_ft_forward_kernel_cache = {}
 @torch.compiler.disable(recursive=False)
 def make_fused_double_ft_forward_kernel(max_active_indices: int, l1_size: int):
     l1_half = l1_size // 2
-    num_threads = _num_threads(l1_half, _FORWARD_THREADS)
+    target = 256 if l1_size == 1024 and torch.cuda.get_device_capability() == (9, 0) else _FORWARD_THREADS
+    num_threads = _num_threads(l1_half, target)
     output_thread_slice_size = l1_half // num_threads
 
     key = (max_active_indices, l1_size, num_threads)
