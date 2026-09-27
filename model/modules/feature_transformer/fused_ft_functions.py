@@ -50,9 +50,13 @@ class FusedDoubleFtFunction(autograd.Function):
         clamped_out = torch.empty(batch_size, 4, l1_half, dtype=torch.float32, device=us.device)
 
         output_size = bias.shape[0]
-        # Only the forward buffer is compact. The autograd input and FT
-        # gradient atomics retain FP32; casts must not create half master grads.
-        use_half = torch.is_autocast_enabled("cuda") and torch.get_autocast_dtype("cuda") == torch.float16
+        # Compact buffers are automatic for the measured H100 training shapes.
+        # Master parameters, autograd gradients and optimizer states stay FP32.
+        ctx.compact = (512 <= l1_size <= 4096 and l1_size % 128 == 0 and batch_size >= 1024
+                       and 0 < max_active_features <= 288
+                       and torch.cuda.get_device_capability(us.device) == (9, 0))
+        use_half = ctx.compact or (torch.is_autocast_enabled("cuda")
+                                  and torch.get_autocast_dtype("cuda") == torch.float16)
         storage = "fp16" if use_half else "fp32"
         work_weight = weight.to(torch.float16) if use_half else weight
         kernel = make_fused_double_ft_forward_kernel(max_active_features, l1_size, storage)
