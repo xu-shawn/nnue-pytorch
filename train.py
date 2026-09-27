@@ -360,6 +360,7 @@ def main():
         rank=rank,
         world_size=world_size,
         local_rank=local_rank,
+        ddp_bucket_cap_mb=args.ddp_bucket_cap_mb,
     )
 
     if actual_threads > 0:

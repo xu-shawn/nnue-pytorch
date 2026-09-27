@@ -95,7 +95,10 @@ class SimpleTrainer:
         rank: int,
         world_size: int,
         local_rank: int,
+        ddp_bucket_cap_mb: int = 50,
     ):
+        if ddp_bucket_cap_mb <= 0:
+            raise ValueError("ddp_bucket_cap_mb must be positive.")
         self.model = model
         self.optimizer = optimizer
         self.max_epochs = max_epochs
@@ -154,7 +157,7 @@ class SimpleTrainer:
                 "static_graph": True,
                 "find_unused_parameters": False,
                 "broadcast_buffers": False,
-                "bucket_cap_mb": 50,
+                "bucket_cap_mb": ddp_bucket_cap_mb,
             }
             if self.device.type == "cuda":
                 kwargs["device_ids"] = [self.local_rank]

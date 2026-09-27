@@ -66,6 +66,9 @@ class TrainingConfig:
     process_group_backend: Literal["nccl", "gloo", "mpi"] | None = None
     """Process group backend for DDP. None picks nccl for CUDA, gloo for CPU."""
 
+    ddp_bucket_cap_mb: int = 50
+    """DDP gradient bucket capacity in MiB. Larger buckets can reduce collective overhead."""
+
     seed: int = 42
     """Torch seed to use."""
 
@@ -103,6 +106,8 @@ class TrainingConfig:
     def __post_init__(self):
         if not self.datasets:
             raise ValueError("Argument `datasets` is required.")
+        if self.ddp_bucket_cap_mb <= 0:
+            raise ValueError("ddp_bucket_cap_mb must be positive.")
         if self.max_epochs <= 0 or self.epoch_size <= 0 or self.batch_size <= 0:
             raise ValueError(
                 "Arguments `max_epochs`, `epoch_size` and `batch_size` must be positive."
