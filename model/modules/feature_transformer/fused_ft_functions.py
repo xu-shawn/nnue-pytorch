@@ -91,7 +91,8 @@ class FusedDoubleFtFunction(autograd.Function):
         max_active_features = white_indices.shape[1]
         output_size = bias.shape[0]
 
-        grad_weight = torch.zeros(weight.shape[0], output_size, dtype=torch.float32, device=us.device)
+        allocate = torch.empty if ctx.compact else torch.zeros
+        grad_weight = allocate(weight.shape[0], output_size, dtype=torch.float32, device=us.device)
         grad_bias = torch.zeros(output_size, dtype=torch.float32, device=us.device)
 
         # Aggregation pays for its feature-union pass on large master-net batches.
@@ -100,7 +101,7 @@ class FusedDoubleFtFunction(autograd.Function):
                 and torch.cuda.get_device_capability(us.device) == (9, 0)):
             aggregated_ft_backward(
                 us, them, white_indices, black_indices, grad_l0, clamped_out,
-                grad_weight, grad_bias, max_ft_activation,
+                grad_weight, grad_bias, max_ft_activation, compact=ctx.compact,
             )
             return None, None, None, None, grad_weight, grad_bias, None, None
 

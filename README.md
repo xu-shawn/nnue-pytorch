@@ -70,20 +70,25 @@ Hard way: [wiki](https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-t
 
 Easier way: [wiki](https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-training-procedure-(easy_train.py))
 
-### Experimental FP16 branch
+### Experimental compact FT training
 
-This branch enables CUDA mixed-precision training by default. Dense matmuls and the
-feature-transformer forward weight buffer use FP16. FT sums and gradient atomics,
-master parameters, optimizer moments, activation quantization and loss calculations
-remain FP32. Keeping FP32 master state preserves small optimizer updates; this is
-not an all-FP16 optimizer.
+This branch automatically uses FP16 forward weight buffers and locally scaled
+FP16 gradient accumulation for supported H100 FT training shapes (aligned widths
+512–4096 and batches of at least 1024). FT sums, biases, returned gradients,
+master parameters, DDP communication, and Adam moments stay FP32. Unsupported
+shapes and devices retain the existing FP32 path.
 
-Dynamic loss scaling is saved in checkpoints. Gradient clipping happens after
-unscaling, and overflow skips both the update and its per-update learning-rate step.
-Existing FP32 checkpoints remain loadable. CPU and MPS retain their usual precision.
-The FP16 path changes rounding and has not been validated for playing strength.
-Broad autocast was slower than FP32 in the four-H100 benchmarks; this branch is
-for precision experiments, not the recommended throughput configuration.
+The backward kernel combines adjacent columns in half2 reductions. A single pass
+converts and unscales its temporary gradient buffer; nonfinite accumulations
+trigger an on-device FP32 recomputation without a host synchronization. This
+prevents overflow from the internal scale, but FP16 accumulation still changes
+rounding and has not been validated for playing strength.
+
+Broad CUDA autocast is disabled by default because it reduced throughput in the
+four-H100 measurements. The explicit `SimpleTrainer(mixed_precision=True)` API
+remains available for precision experiments, with FP32 master parameters and
+Adam moments, dynamic loss scaling, overflow skips, and checkpointed scaler state.
+
 
 ## Logging
 
