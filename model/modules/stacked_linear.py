@@ -5,6 +5,11 @@ from torch import nn
 
 from ..quantize import QuantizationManager
 
+try:
+    from .grouped_linear import grouped_l1
+except (ImportError, OSError, RuntimeError):
+    grouped_l1 = None
+
 
 class StackedLinear(nn.Module):
     def __init__(
@@ -83,6 +88,7 @@ class FactorizedStackedLinear(StackedLinear):
         super().__init__(in_features, out_features, count, quantization, layer_key)
 
         self.factorized_linear = nn.Linear(in_features, out_features)
+        self.use_grouped = False
         self.zero_virtual_weights()
 
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor, fake_quantize_weights: bool=False) -> torch.Tensor:
@@ -96,6 +102,13 @@ class FactorizedStackedLinear(StackedLinear):
                 raise RuntimeError("self.quantization and self.layer_key are required to use fake quantize weights.")
             merged_weight = self.quantization.fake_quantize_weights(merged_weight, f"{self.layer_key}_weight")
             merged_bias = self.quantization.fake_quantize_weights(merged_bias, f"{self.layer_key}_bias")
+
+        if (getattr(self, "use_grouped", False) and x.is_cuda and x.dtype == torch.float32
+                and self.in_features == 1024 and self.out_features == 32
+                and self.count == 8 and x.shape[0] > 0):
+            if grouped_l1 is None:
+                raise RuntimeError("--grouped-l1 requires CuPy and Triton on CUDA.")
+            return grouped_l1(x, merged_weight, merged_bias, ls_indices)
 
         stacked_output = F.linear(x, merged_weight, merged_bias)
 
