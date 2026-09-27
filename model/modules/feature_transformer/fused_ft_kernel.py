@@ -253,7 +253,8 @@ void fused_double_ft_backward(
         )
         kernel.compile()
         def launch(grid, args):
-            kernel(grid=(grid[0], column_tiles), block=(num_threads,), args=args)
+            stream = cp.cuda.ExternalStream(torch.cuda.current_stream().cuda_stream)
+            kernel(grid=(grid[0], column_tiles), block=(num_threads,), args=args, stream=stream)
 
         _fused_double_ft_backward_kernel_cache[key] = launch
     return _fused_double_ft_backward_kernel_cache[key]
