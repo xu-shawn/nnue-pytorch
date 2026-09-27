@@ -13,3 +13,5 @@ bench
 bench_*
 !tests/**/*.py
 
+# Keep local reports and benchmark artifacts out of commits.
+/docs/
