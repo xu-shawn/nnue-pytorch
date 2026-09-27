@@ -6,14 +6,14 @@ A repeated index within one perspective requires multiplicity, so those tiles
 fall back to individual scatters. No sparsity approximation is used.
 """
 
-from functools import lru_cache
+from functools import cache
 
 import cupy as cp
 import numpy as np
 import torch
 
 
-@lru_cache(maxsize=None)
+@cache
 def _kernels(active: int, width: int):
     A = active
     half = width // 2
