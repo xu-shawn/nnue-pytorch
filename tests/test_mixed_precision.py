@@ -28,7 +28,7 @@ def make_trainer(device):
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, fused=device=="cuda")
     scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer, max_lr=1e-4, total_steps=10)
     trainer = SimpleTrainer(model, optimizer, [scheduler], 1, 1, 0.1, 100, None,
-                            [], None, device, 0, 1, 0)
+                            [], None, device, 0, 1, 0, mixed_precision=True)
     trainer.scaler = torch.amp.GradScaler("cuda", init_scale=1024, enabled=device == "cuda")
     trainer._last_scale = trainer.scaler.get_scale()
     x = torch.randn(16, 8, device=device)
