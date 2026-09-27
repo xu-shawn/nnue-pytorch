@@ -1,0 +1,35 @@
+{
+  "epoch": 0,
+  "global_step": 1024,
+  "keys": [
+    "epoch",
+    "global_step",
+    "state_dict",
+    "lr_schedulers",
+    "jitter_buffer_value"
+  ],
+  "tensor_count": 14,
+  "all_parameters_finite": true,
+  "ft_shapes": {
+    "model.input.bias": [
+      1024
+    ],
+    "model.input.features.0.weight": [
+      59808,
+      1024
+    ],
+    "model.input.features.1.weight": [
+      4560,
+      1024
+    ],
+    "model.input.features.2.weight": [
+      24576,
+      1024
+    ],
+    "model.input.features.2.virtual_weight": [
+      768,
+      1024
+    ]
+  },
+  "scheduler_last_epoch": 1024
+}

@@ -1,0 +1,242 @@
+[
+  {
+    "threads": 256,
+    "tile": 16,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.322009658813476
+  },
+  {
+    "threads": 512,
+    "tile": 8,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": true,
+    "ms": 4.589244842529297
+  },
+  {
+    "threads": 128,
+    "tile": 4,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 4.719647979736328
+  },
+  {
+    "threads": 128,
+    "tile": 16,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.315488052368164
+  },
+  {
+    "threads": 256,
+    "tile": 8,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.436201477050782
+  },
+  {
+    "threads": 256,
+    "tile": 4,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 5.026492691040039
+  },
+  {
+    "threads": 128,
+    "tile": 1,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.311494445800781
+  },
+  {
+    "threads": 256,
+    "tile": 4,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.410464096069336
+  },
+  {
+    "threads": 256,
+    "tile": 16,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 5.120006561279297
+  },
+  {
+    "threads": 128,
+    "tile": 1,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 5.0165760040283205
+  },
+  {
+    "threads": 512,
+    "tile": 1,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": true,
+    "ms": 4.646047973632813
+  },
+  {
+    "threads": 256,
+    "tile": 8,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 5.064630508422852
+  },
+  {
+    "threads": 128,
+    "tile": 8,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.24290885925293
+  },
+  {
+    "threads": 512,
+    "tile": 16,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": false,
+    "ms": 5.4256126403808596
+  },
+  {
+    "threads": 256,
+    "tile": 1,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.504316711425782
+  },
+  {
+    "threads": 512,
+    "tile": 4,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": false,
+    "ms": 5.388489532470703
+  },
+  {
+    "threads": 128,
+    "tile": 16,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 4.839692687988281
+  },
+  {
+    "threads": 512,
+    "tile": 8,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": false,
+    "ms": 5.393318557739258
+  },
+  {
+    "threads": 128,
+    "tile": 4,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": true,
+    "ms": 4.22327995300293
+  },
+  {
+    "threads": 512,
+    "tile": 16,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": true,
+    "ms": 4.635612869262696
+  },
+  {
+    "threads": 256,
+    "tile": 1,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 5.101830291748047
+  },
+  {
+    "threads": 512,
+    "tile": 1,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": false,
+    "ms": 5.541766357421875
+  },
+  {
+    "threads": 512,
+    "tile": 4,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": false,
+    "skipzero": true,
+    "ms": 4.580611038208008
+  },
+  {
+    "threads": 128,
+    "tile": 8,
+    "shards": 1,
+    "hotstart": 0,
+    "hotend": 0,
+    "colsplit": true,
+    "skipzero": false,
+    "ms": 4.784761428833008
+  }
+]

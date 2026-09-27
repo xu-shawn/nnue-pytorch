@@ -1,0 +1,38 @@
+{
+  "instances": [
+    {
+      "id": 52825332,
+      "start_utc": "2026-09-26T21:27:33.924391+00:00",
+      "destroy_requested_utc": "2026-09-27T00:30:01.998092+00:00",
+      "listed_hourly_cost": 6.961111111111111,
+      "elapsed_hourly_estimate_usd": 21.169654857764275,
+      "note": "4 H100 SXM main benchmark"
+    },
+    {
+      "id": 52844183,
+      "start_utc": "2026-09-26T23:48:49.188205+00:00",
+      "destroy_requested_utc": "2026-09-27T00:03:31.563550+00:00",
+      "listed_hourly_cost": 0.8094444444444444,
+      "elapsed_hourly_estimate_usd": 0.19839828353480057,
+      "note": "5090 VM: guest startup stalled"
+    },
+    {
+      "id": 52845733,
+      "start_utc": "2026-09-27T00:03:32.815030+00:00",
+      "destroy_requested_utc": "2026-09-27T00:10:24.700184+00:00",
+      "listed_hourly_cost": 0.6029629629629629,
+      "elapsed_hourly_estimate_usd": 0.06898652579490049,
+      "note": "5090 VM: GPU initialization error"
+    },
+    {
+      "id": 52846248,
+      "start_utc": "2026-09-27T00:08:54.450082+00:00",
+      "destroy_requested_utc": "2026-09-27T00:30:55.206841+00:00",
+      "listed_hourly_cost": 1.0907407407407408,
+      "elapsed_hourly_estimate_usd": 0.40016755695880196,
+      "note": "5090 VM: successful hardware counters"
+    }
+  ],
+  "all_task_instances_absent_after_cleanup": true,
+  "note": "Wall time times listed hourly rental rate; not an invoice. Excludes bandwidth charges. Two earlier H100 counter probes are recorded separately (combined upper bound $0.55)."
+}

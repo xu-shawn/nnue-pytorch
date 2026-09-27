@@ -1,0 +1,58 @@
+ROOT_DIR: /workspace/master
+SRC_DIR: data_loader/cpp/
+BUILD_DIR: build
+PGO_DIR: pgo_data
+PGO_INPUT: /workspace/master/.pgo/small.binpack
+Cleaning previous build and profile data...
+Configuring PGO_Generate build...
+-- The CXX compiler identification is GNU 11.4.0
+-- Detecting CXX compiler ABI info
+-- Detecting CXX compiler ABI info - done
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+-- Detecting CXX compile features
+-- Detecting CXX compile features - done
+-- No BMI2 support
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE
+-- Configuring done (0.5s)
+-- Generating done (0.0s)
+-- Build files have been written to: /workspace/master/build
+Building instrumented default targets...
+[ 22%] Building CXX object CMakeFiles/training_data_loader_report.dir/training_data_loader_bench.cpp.o
+[ 22%] Building CXX object CMakeFiles/training_data_loader_report.dir/training_data_loader_abi.cpp.o
+[ 33%] Building CXX object CMakeFiles/training_data_loader.dir/training_data_loader.cpp.o
+[ 44%] Building CXX object CMakeFiles/training_data_loader_report.dir/training_data_loader.cpp.o
+[ 55%] Building CXX object CMakeFiles/training_data_loader.dir/training_data_loader_abi.cpp.o
+[ 66%] Linking CXX executable training_data_loader_report
+Copying data_loader_config.ini to output directory for training_data_loader_report
+[ 66%] Built target training_data_loader_report
+[ 77%] Linking CXX shared library libtraining_data_loader.so
+[ 77%] Built target training_data_loader
+[ 88%] Building CXX object CMakeFiles/training_data_loader_pgo_gen.dir/training_data_loader_bench.cpp.o
+[100%] Linking CXX executable training_data_loader_pgo_gen
+[100%] Built target training_data_loader_pgo_gen
+Running bench to generate profile data...
+[ 50%] Built target training_data_loader
+[ 83%] Built target training_data_loader_pgo_gen
+[100%] Running training_data_loader_pgo_gen to generate PGO profiles in /workspace/master/pgo_data
+Configuration loaded successfully from: "/workspace/master/build/data_loader_config.ini"
+Threads: 1 | Iterations: 5
+Iter:        1   Time(s):    0.406   MPos/s:    0.162   It/s:     2.47   MB/s:     9.86   B/pos:       64Iter:        2   Time(s):    0.839   MPos/s:    0.156   It/s:     2.38   MB/s:     8.34   B/pos:       56Iter:        3   Time(s):     1.26   MPos/s:    0.156   It/s:     2.38   MB/s:     9.51   B/pos:       64Iter:        4   Time(s):     1.67   MPos/s:    0.157   It/s:     2.39   MB/s:     10.2   B/pos:       68Iter:        5   Time(s):     2.09   MPos/s:    0.157   It/s:     2.39   MB/s:     10.1   B/pos:       67
+[100%] Built target pgo_run
+Re-configuring for PGO_Use...
+-- No BMI2 support
+-- Configuring done (0.0s)
+-- Generating done (0.0s)
+-- Build files have been written to: /workspace/master/build
+Building default targets with profile data...
+[ 11%] Building CXX object CMakeFiles/training_data_loader.dir/training_data_loader.cpp.o
+[ 22%] Building CXX object CMakeFiles/training_data_loader.dir/training_data_loader_abi.cpp.o
+[ 66%] Built target training_data_loader_report
+[ 77%] Linking CXX shared library libtraining_data_loader.so
+[ 77%] Built target training_data_loader
+[ 88%] Building CXX object CMakeFiles/training_data_loader_bench.dir/training_data_loader_bench.cpp.o
+[100%] Linking CXX executable training_data_loader_bench
+Copying data_loader_config.ini to output directory for training_data_loader_bench
+[100%] Built target training_data_loader_bench
+PGO build complete.

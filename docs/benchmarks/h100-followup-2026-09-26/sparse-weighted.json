@@ -1,0 +1,153 @@
+{
+  "bullet_revision": "6b1795767d6a4080cea6eb99fbba9f1f462a8924",
+  "nnz_mean": 253.74859619140625,
+  "reference_ms": 0.3522581418355306,
+  "grouped_forward_ms": 0.3147775967915853,
+  "transpose_ms": 0.02193386753400167,
+  "variants": [
+    {
+      "threads": 32,
+      "mode": "ballot",
+      "kernel_ms": 0.41772371927897134,
+      "with_transpose_ms": 0.4242495854695638
+    },
+    {
+      "threads": 32,
+      "mode": "compact",
+      "kernel_ms": 0.26959145863850914,
+      "with_transpose_ms": 0.2742666562398275
+    },
+    {
+      "threads": 32,
+      "mode": "packed",
+      "vector": 1,
+      "pack_ms": 0.16023039817810059,
+      "kernel_ms": 0.16982186635335286,
+      "with_pack_transpose_ms": 0.3339455922444661
+    },
+    {
+      "threads": 32,
+      "mode": "packed",
+      "vector": 2,
+      "pack_ms": 0.16037972768147787,
+      "kernel_ms": 0.13821759223937988,
+      "with_pack_transpose_ms": 0.30369494756062826
+    },
+    {
+      "threads": 32,
+      "mode": "packed",
+      "vector": 4,
+      "pack_ms": 0.1602527936299642,
+      "kernel_ms": 0.12746026515960693,
+      "with_pack_transpose_ms": 0.2920255978902181
+    },
+    {
+      "threads": 64,
+      "mode": "ballot",
+      "kernel_ms": 0.24146560033162434,
+      "with_transpose_ms": 0.24719680150349935
+    },
+    {
+      "threads": 64,
+      "mode": "compact",
+      "kernel_ms": 0.17374080022176105,
+      "with_transpose_ms": 0.17973333994547527
+    },
+    {
+      "threads": 64,
+      "mode": "packed",
+      "vector": 1,
+      "pack_ms": 0.11239786942799886,
+      "kernel_ms": 0.13391466140747071,
+      "with_pack_transpose_ms": 0.24777599970499675
+    },
+    {
+      "threads": 64,
+      "mode": "packed",
+      "vector": 2,
+      "pack_ms": 0.11246186892191569,
+      "kernel_ms": 0.12378026644388834,
+      "with_pack_transpose_ms": 0.23765974044799804
+    },
+    {
+      "threads": 64,
+      "mode": "packed",
+      "vector": 4,
+      "pack_ms": 0.11231573422749837,
+      "kernel_ms": 0.1398805300394694,
+      "with_pack_transpose_ms": 0.2543882687886556
+    },
+    {
+      "threads": 128,
+      "mode": "ballot",
+      "kernel_ms": 0.24785706202189128,
+      "with_transpose_ms": 0.2542229334513346
+    },
+    {
+      "threads": 128,
+      "mode": "compact",
+      "kernel_ms": 0.16006399790445963,
+      "with_transpose_ms": 0.165993595123291
+    },
+    {
+      "threads": 128,
+      "mode": "packed",
+      "vector": 1,
+      "pack_ms": 0.10634666283925374,
+      "kernel_ms": 0.13359039624532063,
+      "with_pack_transpose_ms": 0.24355947176615397
+    },
+    {
+      "threads": 128,
+      "mode": "packed",
+      "vector": 2,
+      "pack_ms": 0.10610986550649007,
+      "kernel_ms": 0.12383360068003336,
+      "with_pack_transpose_ms": 0.23346880276997883
+    },
+    {
+      "threads": 128,
+      "mode": "packed",
+      "vector": 4,
+      "pack_ms": 0.10633066495259604,
+      "kernel_ms": 0.13603307406107584,
+      "with_pack_transpose_ms": 0.24550080299377441
+    },
+    {
+      "threads": 256,
+      "mode": "ballot",
+      "kernel_ms": 0.27238826751708983,
+      "with_transpose_ms": 0.27601919174194334
+    },
+    {
+      "threads": 256,
+      "mode": "compact",
+      "kernel_ms": 0.1757354736328125,
+      "with_transpose_ms": 0.18195412953694662
+    },
+    {
+      "threads": 256,
+      "mode": "packed",
+      "vector": 1,
+      "pack_ms": 0.10815467039744059,
+      "kernel_ms": 0.13470187187194824,
+      "with_pack_transpose_ms": 0.24760319391886393
+    },
+    {
+      "threads": 256,
+      "mode": "packed",
+      "vector": 2,
+      "pack_ms": 0.10874239603678386,
+      "kernel_ms": 0.12427626450856527,
+      "with_pack_transpose_ms": 0.2366005261739095
+    },
+    {
+      "threads": 256,
+      "mode": "packed",
+      "vector": 4,
+      "pack_ms": 0.10794026851654052,
+      "kernel_ms": 0.13414613405863443,
+      "with_pack_transpose_ms": 0.24588054021199543
+    }
+  ]
+}

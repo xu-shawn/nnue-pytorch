@@ -1,0 +1,366 @@
+{
+  "checkpoint": "/workspace/mature-init.ckpt",
+  "layers": {
+    "l1": {
+      "shape": [
+        32768,
+        1024
+      ],
+      "outputs": 32,
+      "nnz_mean": 253.74859619140625,
+      "nnz_percentiles": [
+        158.0,
+        239.0,
+        255.0,
+        269.0,
+        378.0
+      ],
+      "bucket_counts": [
+        303,
+        2400,
+        4647,
+        6337,
+        7186,
+        6299,
+        4427,
+        1169
+      ],
+      "reference_forward_ms": 0.3520618756612142,
+      "reference_dx_ms": 0.3808735847473145,
+      "reference_dw_ms": 0.3356149355570475,
+      "variants": [
+        {
+          "threads": 64,
+          "compact_nnz": false,
+          "forward_ms": 0.47968425750732424
+        },
+        {
+          "threads": 64,
+          "compact_nnz": true,
+          "forward_ms": 0.4377845446268717
+        },
+        {
+          "threads": 64,
+          "dx_ms": 0.3131797472635905
+        },
+        {
+          "threads": 128,
+          "compact_nnz": false,
+          "forward_ms": 0.48855787913004556
+        },
+        {
+          "threads": 128,
+          "compact_nnz": true,
+          "forward_ms": 0.4063103993733724
+        },
+        {
+          "threads": 128,
+          "dx_ms": 0.2547839959462484
+        },
+        {
+          "threads": 256,
+          "compact_nnz": false,
+          "forward_ms": 0.5796010971069336
+        },
+        {
+          "threads": 256,
+          "compact_nnz": true,
+          "forward_ms": 0.40688533782958985
+        },
+        {
+          "threads": 256,
+          "dx_ms": 0.27232319513956704
+        },
+        {
+          "grouped_forward": [
+            16,
+            32
+          ],
+          "ms": 0.6602165222167968
+        },
+        {
+          "grouped_forward": [
+            16,
+            64
+          ],
+          "ms": 0.6169685363769531
+        },
+        {
+          "grouped_forward": [
+            32,
+            32
+          ],
+          "ms": 0.3166602770487467
+        },
+        {
+          "grouped_forward": [
+            32,
+            64
+          ],
+          "ms": 0.34993279774983727
+        },
+        {
+          "grouped_forward": [
+            64,
+            32
+          ],
+          "ms": 0.3886773427327474
+        },
+        {
+          "grouped_forward": [
+            64,
+            64
+          ],
+          "ms": 0.3136693318684896
+        },
+        {
+          "grouped_dx": [
+            16,
+            64
+          ],
+          "ms": 0.1737866719563802
+        },
+        {
+          "grouped_dx": [
+            32,
+            64
+          ],
+          "ms": 0.1100938638051351
+        },
+        {
+          "grouped_dx": [
+            32,
+            128
+          ],
+          "ms": 0.10210560162862142
+        },
+        {
+          "grouped_dx": [
+            64,
+            64
+          ],
+          "ms": 0.09963200092315674
+        },
+        {
+          "grouped_dw": [
+            4,
+            32,
+            32
+          ],
+          "ms": 0.1671669324239095
+        },
+        {
+          "grouped_dw": [
+            8,
+            32,
+            32
+          ],
+          "ms": 0.1484831968943278
+        },
+        {
+          "grouped_dw": [
+            16,
+            32,
+            32
+          ],
+          "ms": 0.13659520149230958
+        },
+        {
+          "grouped_dw": [
+            8,
+            32,
+            64
+          ],
+          "ms": 0.1405962626139323
+        },
+        {
+          "grouped_dw": [
+            8,
+            64,
+            32
+          ],
+          "ms": 0.13800746599833172
+        },
+        {
+          "grouped_dw": [
+            16,
+            16,
+            32
+          ],
+          "ms": 0.15534186363220215
+        }
+      ],
+      "routing_ms": 0.03260693351427714
+    },
+    "l2": {
+      "shape": [
+        32768,
+        64
+      ],
+      "outputs": 32,
+      "nnz_mean": 42.528564453125,
+      "nnz_percentiles": [
+        26.0,
+        40.0,
+        43.0,
+        45.0,
+        56.0
+      ],
+      "bucket_counts": [
+        303,
+        2400,
+        4647,
+        6337,
+        7186,
+        6299,
+        4427,
+        1169
+      ],
+      "reference_forward_ms": 0.08745813369750977,
+      "reference_dx_ms": 0.03038933277130127,
+      "reference_dw_ms": 0.038318932056427,
+      "variants": [
+        {
+          "threads": 64,
+          "compact_nnz": false,
+          "forward_ms": 0.050162132581075033
+        },
+        {
+          "threads": 64,
+          "compact_nnz": true,
+          "forward_ms": 0.05595839818318685
+        },
+        {
+          "threads": 64,
+          "dx_ms": 0.02333013415336609
+        },
+        {
+          "threads": 128,
+          "compact_nnz": false,
+          "forward_ms": 0.049768535296122234
+        },
+        {
+          "threads": 128,
+          "dx_ms": 0.03966933488845825
+        },
+        {
+          "threads": 256,
+          "compact_nnz": false,
+          "forward_ms": 0.0523967981338501
+        },
+        {
+          "threads": 256,
+          "dx_ms": 0.07549866835276285
+        }
+      ],
+      "routing_ms": 0.03203199903170268
+    },
+    "output": {
+      "shape": [
+        32768,
+        128
+      ],
+      "outputs": 1,
+      "nnz_mean": 80.76327514648438,
+      "nnz_percentiles": [
+        58.0,
+        76.0,
+        80.0,
+        85.0,
+        104.0
+      ],
+      "bucket_counts": [
+        303,
+        2400,
+        4647,
+        6337,
+        7186,
+        6299,
+        4427,
+        1169
+      ],
+      "reference_forward_ms": 0.08596586386362712,
+      "reference_dx_ms": 0.01051520009835561,
+      "reference_dw_ms": 0.020156800746917725,
+      "variants": [
+        {
+          "threads": 64,
+          "compact_nnz": false,
+          "forward_ms": 0.023285333315531412
+        },
+        {
+          "threads": 64,
+          "compact_nnz": true,
+          "forward_ms": 0.023987199862798056
+        },
+        {
+          "threads": 64,
+          "dx_ms": 0.02252053419748942
+        },
+        {
+          "threads": 128,
+          "compact_nnz": false,
+          "forward_ms": 0.023215999205907185
+        },
+        {
+          "threads": 128,
+          "compact_nnz": true,
+          "forward_ms": 0.026825600862503053
+        },
+        {
+          "threads": 128,
+          "dx_ms": 0.022587732474009196
+        },
+        {
+          "threads": 256,
+          "compact_nnz": false,
+          "forward_ms": 0.028148265679677327
+        },
+        {
+          "threads": 256,
+          "dx_ms": 0.022641066710154215
+        }
+      ],
+      "routing_ms": 0.03225920001665751
+    }
+  },
+  "stages": {
+    "merge_and_quantize_ft_weights_ms": 0.2510986646016439,
+    "ft_forward_ms": 1.7180511474609375,
+    "ft_output_quantize_ms": 0.09313066800435384
+  },
+  "ft_forward_variants": [
+    {
+      "scalar_threads": 32,
+      "ms": 2.420425605773926
+    },
+    {
+      "scalar_threads": 64,
+      "ms": 1.6400352478027345
+    },
+    {
+      "scalar_threads": 128,
+      "ms": 1.7171360015869142
+    },
+    {
+      "scalar_threads": 256,
+      "ms": 1.5365440368652343
+    },
+    {
+      "scalar_threads": 512,
+      "ms": 1.705721664428711
+    },
+    {
+      "vector_threads": 32,
+      "ms": 1.584716796875
+    },
+    {
+      "vector_threads": 64,
+      "ms": 1.5391615867614745
+    },
+    {
+      "vector_threads": 128,
+      "ms": 1.5282624244689942
+    }
+  ]
+}

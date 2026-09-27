@@ -1,0 +1,363 @@
+{
+  "environment": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "capability": [
+      12,
+      0
+    ],
+    "cupy": "13.6.0",
+    "cuda_runtime": 12090,
+    "driver": 13000,
+    "timing_ms": {
+      "forward": 1.6755456924438477,
+      "backward_with_zero": 3.5478111267089845
+    },
+    "input_shape": [
+      32768,
+      288
+    ],
+    "note": "Real H100 inputs and launch geometry; cross-architecture diagnostic, not H100 counters."
+  },
+  "cache_modes": {
+    "flush": {
+      "fused_double_ft_forward": {
+        "gpu__time_duration.sum": {
+          "value": 2.354752,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 25.882171,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 456.779822,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 93.678011,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 91.073798,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 0.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 31.022015,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 97.621705,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 61.762362,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 4.566966,
+          "unit": "inst"
+        }
+      },
+      "fused_double_ft_backward": {
+        "gpu__time_duration.sum": {
+          "value": 4.55808,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 11.693729,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 206.379388,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 72.946141,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 93.154769,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 284068608.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 19.372729,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 98.918642,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 33.861978,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 41.26722,
+          "unit": "inst"
+        }
+      },
+      "ft_pack_features": {
+        "gpu__time_duration.sum": {
+          "value": 0.328576,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 13.560374,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 239.266069,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 7.920212,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 37.317329,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 0.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 19.912511,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 16.543773,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 7.729024,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 0.0,
+          "unit": "inst"
+        }
+      },
+      "ft_aggregate_backward": {
+        "gpu__time_duration.sum": {
+          "value": 3.717056,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 14.243966,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 251.387799,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 74.061513,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 91.506446,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 233753499.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 39.827642,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 41.245085,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 6.196273,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 0.026957,
+          "unit": "inst"
+        }
+      }
+    },
+    "warm": {
+      "fused_double_ft_forward": {
+        "gpu__time_duration.sum": {
+          "value": 2.347072,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 25.583015,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 451.500668,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 94.168669,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 91.420523,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 0.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 31.133518,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 97.5592,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 61.47321,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 4.495747,
+          "unit": "inst"
+        }
+      },
+      "fused_double_ft_backward": {
+        "gpu__time_duration.sum": {
+          "value": 4.569504,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 12.02739,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 212.267821,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 72.761505,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 93.238561,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 284068608.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 19.424695,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 97.958722,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 33.984573,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 41.302914,
+          "unit": "inst"
+        }
+      },
+      "ft_pack_features": {
+        "gpu__time_duration.sum": {
+          "value": 0.34208,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 19.37232,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 341.867914,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 7.603132,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 37.653083,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 0.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 19.10591,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 16.576454,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 8.548609,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 0.0,
+          "unit": "inst"
+        }
+      },
+      "ft_aggregate_backward": {
+        "gpu__time_duration.sum": {
+          "value": 3.723968,
+          "unit": "ms"
+        },
+        "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 14.589134,
+          "unit": "%"
+        },
+        "dram__bytes.sum.per_second": {
+          "value": 257.478268,
+          "unit": "Gbyte/s"
+        },
+        "lts__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 73.919059,
+          "unit": "%"
+        },
+        "lts__t_sector_hit_rate.pct": {
+          "value": 91.587128,
+          "unit": "%"
+        },
+        "lts__t_sectors_srcunit_tex_op_red.sum": {
+          "value": 233753499.0,
+          "unit": "sector"
+        },
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed": {
+          "value": 39.74334,
+          "unit": "%"
+        },
+        "sm__warps_active.avg.pct_of_peak_sustained_active": {
+          "value": 40.875768,
+          "unit": "%"
+        },
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio": {
+          "value": 6.221621,
+          "unit": "inst"
+        },
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio": {
+          "value": 0.026255,
+          "unit": "inst"
+        }
+      }
+    }
+  }
+}

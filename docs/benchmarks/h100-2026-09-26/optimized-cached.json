@@ -1,0 +1,42 @@
+{
+  "args": {
+    "data": [
+      "/workspace/data/wrongIsRight_nodes5000pv2.relabel-BT4-tf13tune.binpack",
+      "/workspace/data/test80-2024-02-feb-2tb7p.min-v2.v6.relabel.binpack"
+    ],
+    "batch_size": 131072,
+    "workers": 32,
+    "threads": 1,
+    "warmup": 64,
+    "steps": 256,
+    "repeats": 3,
+    "cached": 8,
+    "batch_cache": "/workspace/real-batches",
+    "resume_from_checkpoint": "/workspace/runs/reproduction-eba1ed8/lightning_logs/version_0/checkpoints/last.ckpt",
+    "compile_backend": "inductor",
+    "profile": false,
+    "output": "/workspace/results/optimized-cached.json"
+  },
+  "world_size": 4,
+  "torch": "2.6.0+cu124",
+  "cuda": "12.4",
+  "gpu": "NVIDIA H100 80GB HBM3",
+  "window_seconds": [
+    3.4791267532855272,
+    3.4809981044381857,
+    3.4756355173885822
+  ],
+  "positions_per_second": [
+    9644498.283459416,
+    9639313.493799074,
+    9654186.071044387
+  ],
+  "median_step_ms": 13.59033888002159,
+  "losses_rank0": [
+    0.01136363297700882,
+    0.009492439217865467,
+    0.007879527285695076
+  ],
+  "peak_allocated_gb_rank0": 3.288136192,
+  "hostname": "d028f6e40a92"
+}

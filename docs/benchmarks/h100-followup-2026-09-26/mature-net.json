@@ -1,0 +1,7 @@
+{
+  "url": "https://tests.stockfishchess.org/api/nn/nn-252f33942263.nnue",
+  "bytes": 98668604,
+  "sha256": "252f33942263bc8b8f740ba8aec3fed5a159ff148113c47a55c18c33d6627ab3",
+  "features": "Full_Threats+PP_3Wide+HalfKAv2_hm^",
+  "note": "Serialized mature weights; original AdamW moments and schedule state are unavailable. Fresh optimizer for controlled training benchmarks."
+}
