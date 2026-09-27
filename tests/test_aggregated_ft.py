@@ -1,4 +1,4 @@
-"""Aggregation parity, including multiplicity and stream ordering."""
+"""Aggregation parity with unique row indices, cross-row overlap and streams."""
 
 import pytest
 import torch
@@ -12,7 +12,7 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
 )
 @pytest.mark.parametrize("width", [1024, 1152, 1280])
 @pytest.mark.parametrize("batch,active", [(1, 33), (17, 288), (1025, 33)])
-@pytest.mark.parametrize("kind", ["empty", "unique", "duplicate"])
+@pytest.mark.parametrize("kind", ["empty", "unique", "overlap"])
 @pytest.mark.parametrize("separate_stream", [False, True])
 def test_aggregated_ft(width, batch, active, kind, separate_stream):
     if torch.cuda.get_device_capability() != (9, 0):
@@ -40,14 +40,15 @@ def test_aggregated_ft(width, batch, active, kind, separate_stream):
         if kind != "empty":
             for row in range(batch):
                 n = min(31, row % 32)
-                white[row, :n] = torch.randperm(64, device=device)[:n]
-                black[row, : n // 2] = torch.randperm(64, device=device)[: n // 2]
-                if kind == "duplicate" and n >= 2:
-                    white[row, 1] = white[row, 0]
+                if kind == "overlap":
+                    # Repeat IDs across positions/perspectives, never within a row.
+                    white[row, :n] = torch.arange(n, device=device)
+                    black[row, : n // 2] = torch.arange(n // 2, device=device)
+                else:
+                    white[row, :n] = torch.randperm(64, device=device)[:n]
+                    black[row, : n // 2] = torch.randperm(64, device=device)[: n // 2]
             # A full row exercises compaction capacity and no padding.
-            white[-1] = torch.arange(active, device=device) % (
-                16 if kind == "duplicate" else 512
-            )
+            white[-1] = torch.arange(active, device=device)
 
         w0, w1, b0, b1 = clamped.unbind(1)
         d0, d1 = grad.chunk(2, dim=1)

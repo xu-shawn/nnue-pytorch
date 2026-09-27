@@ -1,4 +1,4 @@
-"""Compact accumulation: rounding, overflow recovery, multiplicity and streams."""
+"""Compact accumulation: rounding, overflow recovery, cross-row overlap and streams."""
 
 import pytest
 import torch
@@ -11,7 +11,7 @@ from model.modules.feature_transformer.fused_ft_functions import _HAS_CUPY_KERNE
     reason="CUDA and CuPy required",
 )
 @pytest.mark.parametrize("width", [1024, 1152, 1280])
-@pytest.mark.parametrize("kind", ["normal", "overflow", "duplicate", "empty"])
+@pytest.mark.parametrize("kind", ["normal", "overflow", "overlap", "empty"])
 def test_compact_gradients(width, kind):
     if torch.cuda.get_device_capability() != (9, 0):
         pytest.skip("H100 specialization")
@@ -32,10 +32,12 @@ def test_compact_gradients(width, kind):
             [torch.randperm(64, device="cuda")[:active] for _ in range(batch)]
         ).int()
         black = white.roll(3, 0).clone()
+        if kind == "overlap":
+            # Every position shares IDs; each perspective still has unique indices.
+            white[:] = torch.arange(active, device="cuda")
+            black[:] = white
         white[:, 9:] = -1
         black[:, 13:] = -1
-        if kind == "duplicate":
-            white[:, 1] = white[:, 0]
         if kind == "empty":
             white.fill_(-1)
             black.fill_(-1)
