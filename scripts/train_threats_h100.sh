@@ -10,6 +10,13 @@ if (( $# == 0 )); then
 fi
 
 cd "$(dirname "$0")/.."
+# Sparse batches exceed glibc's usual per-thread heap size. Reusing these
+# allocations avoids expensive mmap/munmap turnover on every batch.
+# Existing allocator settings take precedence.
+export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-1}"
+export MALLOC_MMAP_THRESHOLD_="${MALLOC_MMAP_THRESHOLD_:-134217728}"
+export MALLOC_TRIM_THRESHOLD_="${MALLOC_TRIM_THRESHOLD_:-268435456}"
+
 exec torchrun --standalone --nnodes=1 --nproc-per-node=4 \
     ddp_launcher.py train.py \
     --accelerator cuda --threads "${NNUE_TORCH_THREADS:-1}" --num-workers "${NNUE_LOADER_WORKERS:-32}" \
