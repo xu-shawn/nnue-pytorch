@@ -1,6 +1,6 @@
 """Selected-bucket L1 matmul for the H100 master-net workload.
 
-Only the requested one of eight K→32 layers is evaluated, with NNZ-compacted
+Only the requested one of eight K→N layers is evaluated, with NNZ-compacted
 forward. A GPU row map allows tiled FP32 backward matmuls without sorting/copying
 the large activation tensor or reading bucket sizes on the host. Split reductions
 keep weight gradients parallel even when bucket populations differ. Input
@@ -24,10 +24,12 @@ def _sparse_forward(x, weight, bias, indices):
     measured cost; parameter storage and dense STE input gradients stay intact.
     """
     width = x.shape[1]
-    kernel = _sparse_forward_kernels.get(width)
+    outputs = bias.numel() // 8
+    key = (width, outputs)
+    kernel = _sparse_forward_kernels.get(key)
     if kernel is None:
         kernel = cp.RawKernel(
-            f"#define K {width}\n" + r"""
+            f"#define K {width}\n#define N {outputs}\n" + r"""
 extern "C" __global__ void sparse_l1_forward(
     const float* x, const float* weight, const float* bias,
     const long long* buckets, float* output
@@ -36,6 +38,7 @@ extern "C" __global__ void sparse_l1_forward(
     const int lane = threadIdx.x % 32;
     const int warp = threadIdx.x / 32;
     const int bucket = buckets[row];
+    const int column = (N <= 32 ? 0 : blockIdx.y * 32) + lane;
     __shared__ int nnz, indices[K];
     __shared__ float values[K], partial[4][32];
     if (threadIdx.x == 0) nnz = 0;
@@ -56,28 +59,30 @@ extern "C" __global__ void sparse_l1_forward(
     __syncthreads();
 
     float acc = 0.0f;
-    for (int i = warp; i < nnz; i += 4) {
-        const int k = indices[i];
-        acc = fmaf(values[i], weight[(bucket * K + k) * 32 + lane], acc);
+    if (column < N) {
+        for (int i = warp; i < nnz; i += 4) {
+            const int k = indices[i];
+            acc = fmaf(values[i], weight[(bucket * K + k) * N + column], acc);
+        }
     }
     partial[warp][lane] = acc;
     __syncthreads();
-    if (warp == 0) {
-        float total = bias[bucket * 32 + lane];
+    if (warp == 0 && column < N) {
+        float total = bias[bucket * N + column];
         #pragma unroll
         for (int i = 0; i < 4; ++i) total += partial[i][lane];
-        output[row * 32 + lane] = total;
+        output[row * N + column] = total;
     }
 }
 """,
             "sparse_l1_forward",
         )
-        _sparse_forward_kernels[width] = kernel
-    transposed = weight.reshape(8, 32, width).transpose(1, 2).contiguous()
-    output = torch.empty((len(x), 32), device=x.device, dtype=x.dtype)
+        _sparse_forward_kernels[key] = kernel
+    transposed = weight.reshape(8, outputs, width).transpose(1, 2).contiguous()
+    output = torch.empty((len(x), outputs), device=x.device, dtype=x.dtype)
     stream = cp.cuda.ExternalStream(torch.cuda.current_stream(x.device).cuda_stream)
     kernel(
-        (len(x),),
+        (len(x), tr.cdiv(outputs, 32)),
         (128,),
         (x.data_ptr(), transposed.data_ptr(), bias.data_ptr(), indices.data_ptr(), output.data_ptr()),
         stream=stream,
@@ -323,10 +328,10 @@ class _GroupedLinear(torch.autograd.Function):
 
 @torch.compiler.disable
 def grouped_l1(x, weight, bias, indices):
-    """FP32 K→32 linear for eight buckets; indices must be in [0, 8).
+    """FP32 K→N linear for eight buckets, 1 <= N <= 128; indices in [0, 8).
 
     Bucket counts stay on the GPU. Parameters and output row order are identical
-    to a dense K→256 linear followed by selection. First-order training only,
+    to a dense K→(8*N) linear followed by selection. First-order training only,
     as with the custom feature transformer. The caller handles other shapes.
     """
     return _GroupedLinear.apply(x, weight, bias, indices)
