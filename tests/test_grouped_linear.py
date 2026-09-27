@@ -32,16 +32,17 @@ def _reference(layer, x, indices, quantize=False):
 
 
 @pytest.mark.skipif(not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required")
+@pytest.mark.parametrize("width", [1024, 1152, 1280])
 @pytest.mark.parametrize("batch", [1, 17, 257])
 @pytest.mark.parametrize("concentrated", [False, True])
 @pytest.mark.parametrize("quantize", [False, True])
-def test_grouped_forward_and_all_gradients(batch, concentrated, quantize, monkeypatch):
+def test_grouped_forward_and_all_gradients(width, batch, concentrated, quantize, monkeypatch):
     torch.manual_seed(123)
-    layer = FactorizedStackedLinear(1024, 32, 8, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
+    layer = FactorizedStackedLinear(width, 32, 8, QuantizationManager(QuantizationConfig()), "ls_l1").cuda()
     # Strided all-zero, dense and 75%-zero inputs; uneven/empty buckets and partial tiles.
-    storage = torch.randn(batch, 1024, 2, device="cuda")
+    storage = torch.randn(batch, width, 2, device="cuda")
     zero_fraction = {1: 1.0, 17: 0.0, 257: 0.75}[batch]
-    storage[..., 0].masked_fill_(torch.rand(batch, 1024, device="cuda") < zero_fraction, 0)
+    storage[..., 0].masked_fill_(torch.rand(batch, width, device="cuda") < zero_fraction, 0)
     x = storage[..., 0].detach().requires_grad_()
     indices = torch.randint(0, 8, (batch, 1), device="cuda", dtype=torch.int32)
     if concentrated:
@@ -76,7 +77,7 @@ def test_grouped_forward_and_all_gradients(batch, concentrated, quantize, monkey
 ])
 @pytest.mark.parametrize("case", ["dependencies", "width", "outputs", "buckets", "dtype", "empty", "autocast"])
 def test_grouped_fallback(device, case, monkeypatch):
-    width = 512 if case == "width" else 1024
+    width = 264 if case == "width" else 1024
     outputs = 16 if case == "outputs" else 32
     buckets = 4 if case == "buckets" else 8
     dtype = torch.float64 if case == "dtype" else torch.float32
