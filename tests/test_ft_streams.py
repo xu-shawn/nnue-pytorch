@@ -22,8 +22,8 @@ def test_ft_on_nondefault_stream(backend, width, batch):
         torch.cuda._sleep(2_000_000)
         us = torch.randint(0, 2, (batch, 1), device="cuda").float()
         them = 1 - us
-        white = torch.randint(0, 64, (batch, 17), device="cuda", dtype=torch.int32)
-        black = torch.randint(0, 64, (batch, 17), device="cuda", dtype=torch.int32)
+        white = torch.rand(batch, 64, device="cuda").argsort(dim=1)[:, :17].to(torch.int32).contiguous()
+        black = torch.rand(batch, 64, device="cuda").argsort(dim=1)[:, :17].to(torch.int32).contiguous()
         white[:, 9:] = -1
         black[:, 13:] = -1
         weight = (torch.randn(64, width, device="cuda") / 16).requires_grad_()
