@@ -50,8 +50,11 @@ class StackedLinear(nn.Module):
             bias = self.quantization.fake_quantize_weights(bias, f"{self.layer_key}_bias")
 
         stacked_output = F.linear(x, weight, bias)
-
-        return self.select_output(stacked_output, ls_indices)
+        selected = self.select_output(stacked_output, ls_indices)
+        # Keep activation quantization and skip sums in FP32 under autocast.
+        if selected.is_cuda and selected.dtype in (torch.float16, torch.bfloat16):
+            return selected.float()
+        return selected
 
     def select_output(
         self, stacked_output: torch.Tensor, ls_indices: torch.Tensor
@@ -122,8 +125,11 @@ class FactorizedStackedLinear(StackedLinear):
             return grouped_l1(x, merged_weight, merged_bias, ls_indices)
 
         stacked_output = F.linear(x, merged_weight, merged_bias)
-
-        return self.select_output(stacked_output, ls_indices)
+        selected = self.select_output(stacked_output, ls_indices)
+        # Only convert the selected bucket; nonlinear operations use FP32.
+        if selected.is_cuda and selected.dtype in (torch.float16, torch.bfloat16):
+            return selected.float()
+        return selected
 
     @torch.no_grad()
     def zero_virtual_weights(self):
