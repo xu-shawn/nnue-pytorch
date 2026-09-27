@@ -70,26 +70,6 @@ Hard way: [wiki](https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-t
 
 Easier way: [wiki](https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-training-procedure-(easy_train.py))
 
-### Experimental compact FT training
-
-This branch automatically uses FP16 forward weight buffers and locally scaled
-FP16 gradient accumulation for supported H100 FT training shapes (aligned widths
-512–4096 and batches of at least 1024). FT sums, biases, returned gradients,
-master parameters, DDP communication, and Adam moments stay FP32. Unsupported
-shapes and devices retain the existing FP32 path.
-
-The backward kernel combines adjacent columns in half2 reductions. A single pass
-converts and unscales its temporary gradient buffer; nonfinite accumulations
-trigger an on-device FP32 recomputation without a host synchronization. This
-prevents overflow from the internal scale, but FP16 accumulation still changes
-rounding and has not been validated for playing strength.
-
-Broad CUDA autocast is disabled by default because it reduced throughput in the
-four-H100 measurements. The explicit `SimpleTrainer(mixed_precision=True)` API
-remains available for precision experiments, with FP32 master parameters and
-Adam moments, dynamic loss scaling, overflow skips, and checkpointed scaler state.
-
-
 ## Logging
 
 TODO: Move to wiki. Add setup for easy_train.py
