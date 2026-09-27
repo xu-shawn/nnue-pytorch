@@ -76,27 +76,22 @@ void fused_double_ft_forward(
         b1[s] = __ldg(&bias[i + l1_half]);
     }
 
-    for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-        int w_idx = w_idx_row[k];
-        if (w_idx == -1) break;
-
+    // Interleave independent perspectives without changing either sum's order.
+    // Widen row offsets before multiplying by the compile-time weight stride.
+    for (int k = 0; k < """ + str(max_active_indices) + r"""; ++k) {
+        int wi = w_idx_row[k], bi = b_idx_row[k];
+        if (wi == -1 && bi == -1) break;
         #pragma unroll
         for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
             uint32_t i = s * n_threads + tid;
-            w0[s] += load_ft(__ldg(&weight[w_idx * output_size + i]));
-            w1[s] += load_ft(__ldg(&weight[w_idx * output_size + i + l1_half]));
-        }
-    }
-
-    for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
-        int b_idx = b_idx_row[k];
-        if (b_idx == -1) break;
-
-        #pragma unroll
-        for (uint32_t s = 0; s < """ + str(output_thread_slice_size) + r"""; ++s) {
-            uint32_t i = s * n_threads + tid;
-            b0[s] += load_ft(__ldg(&weight[b_idx * output_size + i]));
-            b1[s] += load_ft(__ldg(&weight[b_idx * output_size + i + l1_half]));
+            if (wi >= 0) {
+                w0[s] += load_ft(__ldg(&weight[(size_t)(unsigned)wi * l1_size + i]));
+                w1[s] += load_ft(__ldg(&weight[(size_t)(unsigned)wi * l1_size + i + l1_half]));
+            }
+            if (bi >= 0) {
+                b0[s] += load_ft(__ldg(&weight[(size_t)(unsigned)bi * l1_size + i]));
+                b1[s] += load_ft(__ldg(&weight[(size_t)(unsigned)bi * l1_size + i + l1_half]));
+            }
         }
     }
 
