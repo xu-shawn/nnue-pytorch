@@ -177,6 +177,7 @@ void fused_double_ft_backward(
     const int32_t l1_half = """ + str(l1_half) + r""";
     const int32_t n_threads = """ + str(column_stride) + r""";
     const int32_t tile_size = """ + str(tile_size) + r""";
+    const bool skip_zero_atomics = """ + str(column_tiles > 1).lower() + r""";
 
     __shared__ float shared_grad_bias[""" + str(output_size) + r"""];
     for (int i = tid; i < output_size; i += n_threads) {
@@ -219,14 +220,18 @@ void fused_double_ft_backward(
             for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
                 int w_idx = w_idx_row[k];
                 if (w_idx == -1) break;
+                if (!skip_zero_atomics || g_w0 != 0.0f)
                     atomicAdd(&grad_weight[w_idx * output_size + col], g_w0);
+                if (!skip_zero_atomics || g_w1 != 0.0f)
                     atomicAdd(&grad_weight[w_idx * output_size + col + l1_half], g_w1);
             }
 
             for(int k=0; k<""" + str(max_active_indices) + r"""; ++k) {
                 int b_idx = b_idx_row[k];
                 if (b_idx == -1) break;
+                if (!skip_zero_atomics || g_b0 != 0.0f)
                     atomicAdd(&grad_weight[b_idx * output_size + col], g_b0);
+                if (!skip_zero_atomics || g_b1 != 0.0f)
                     atomicAdd(&grad_weight[b_idx * output_size + col + l1_half], g_b1);
             }
 
