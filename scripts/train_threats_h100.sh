@@ -19,7 +19,7 @@ export MALLOC_TRIM_THRESHOLD_="${MALLOC_TRIM_THRESHOLD_:-268435456}"
 
 exec torchrun --standalone --nnodes=1 --nproc-per-node=4 \
     ddp_launcher.py train.py \
-    --accelerator cuda --threads "${NNUE_TORCH_THREADS:-1}" --num-workers "${NNUE_LOADER_WORKERS:-32}" \
+    --accelerator cuda --threads "${NNUE_TORCH_THREADS:-4}" --num-workers "${NNUE_LOADER_WORKERS:-64}" \
     --compile-backend inductor --data-loader-queue-size 4 --ddp-bucket-cap-mb 400 \
     --features 'Full_Threats+PP_3Wide+HalfKAv2_hm^' --l1 1024 --l2 32 --grouped-l1 --sparse-l1 \
     --optimizer-name adamw --lr 0.4e-3 --factorized-weight-decay 4.0e-5 \
