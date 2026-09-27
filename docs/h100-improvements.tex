@@ -1,0 +1,81 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=15mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{tgheros,tgcursor}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{microtype,booktabs,tabularx,array,xcolor}
+\usepackage[colorlinks=true,urlcolor=blue!55!black]{hyperref}
+\definecolor{ink}{HTML}{16324F}
+\definecolor{accent}{HTML}{087F8C}
+\definecolor{muted}{HTML}{526273}
+\pagestyle{empty}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.12}
+\newcommand{\sect}[1]{\vspace{4pt}{\color{ink}\bfseries #1}\par\vspace{1pt}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\hypersetup{pdftitle={Four-H100 training improvements},pdfsubject={Measured trainer optimizations and validation}}
+\begin{document}
+{\LARGE\bfseries\color{ink} Four-H100 training improvements}\hfill{\small 26--27 September 2026}
+
+{\large\bfseries\color{accent} 90.6 iterations/s sustained live training\quad +25.7\%}
+
+Versus 72.1 it/s with the corrected loader and starting GPU kernels. Four H100 SXM 80 GB;
+global batch 131,072; FP32; AdamW; no-PSQT threats network, L1=1024 and L2=L3=32.
+All production filters remain enabled, including check/capture filtering and random FEN skipping of 10.
+
+\sect{Measured progression}
+\begin{tabularx}{\linewidth}{@{}Yrr@{}}
+\toprule
+\textbf{Mature-network configuration} & \textbf{Live it/s} & \textbf{Gain over baseline}\\
+\midrule
+Corrected loader, starting GPU kernels & 72.10 & ---\\
+FT launch/atomic tuning + bucketed dense L1 + DDP & 85.39 & 18.4\%\\
+Add weighted-NNZ L1 forward & 86.40 & 19.8\%\\
+Add eight-position FT gradient aggregation & \textbf{90.62} & \textbf{25.7\%}\\
+\bottomrule
+\end{tabularx}
+{\small\color{muted} Medians of three 2,048-step windows after 1,024 warmup steps. Final cached throughput: 93.76 it/s.}
+
+\sect{Retained improvements}
+\begin{tabularx}{\linewidth}{@{}p{39mm}Y@{}}
+\textbf{Loader allocation reuse} & glibc arena/mmap/trim settings reduce native batch release from 10.5 to 0.024 ms.\\
+\textbf{Loader staging threads} & Four torch threads and 64 loader workers per rank; combined loader tuning raises roughly 37 to 72 it/s. Production sampling is preserved.\\
+\textbf{BMI2 detection} & Match the complete CPU flag so AVX-512 VBMI2 does not disable the decoder fast path. No isolated speedup attributed.\\
+\textbf{Loss metric updates} & Remove per-update GPU-to-CPU NaN checks; retain nonfinite-loss checks at logging boundaries. Included in the corrected baseline.\\
+\textbf{FT forward launch} & 256-thread blocks for H100/L1=1024: about 1.69 to 1.50 ms. General shapes retain their existing path.\\
+\textbf{FT backward launch} & Four 128-thread column blocks plus zero-gradient atomic guards: about 5.34 to 3.84 ms. These are separate commits.\\
+\textbf{FT feature aggregation} & Combine updates across eight positions before global atomics. About 3.18 ms backward + 0.18 ms packing; +4.9\% live throughput. Duplicate indices use a correctness fallback.\\
+\textbf{Selected-bucket L1} & Compute the selected bucket directly. Input-gradient kernel: 0.381 to 0.104 ms; weight-gradient kernel: 0.330 to 0.107 ms, plus small reductions.\\
+\textbf{Weighted-NNZ L1} & Compact nonzeros and coalesce weight reads. Forward: 0.315 to 0.166 ms including packing/transpose; about +1.3\% whole-step throughput at 25\% activation density.\\
+\textbf{DDP bucket size} & 50 to 400 MiB reduces gradient collectives from three to one. Pre-aggregation four-GPU scaling was 3.18$\times$ (79.6\% efficiency); scaling is not proven optimal.\\
+\end{tabularx}
+
+\sect{Hardware-counter finding}
+A full 5090 VM enabled Nsight Compute counters. With cache flushing disabled, FT forward reached
+\textbf{94\% L2 / 26\% DRAM} throughput; direct backward reached \textbf{73\% L2 / 12\% DRAM}.
+This points to cache/atomic pressure on that GPU. Aggregation reduced L2 reduction sectors by 17.7\%
+in the default-cache run. These are \textbf{5090 diagnostics, not H100 bandwidth measurements}.
+
+\sect{Validation and limits}
+\textbf{104 tests passed, 2 skipped on H100}; full production-size validation and checkpoint resume
+through step 2,560 completed with finite loss. The mature net came from the supplied public
+\texttt{nn-252f33942263.nnue}; comparisons used identical fresh optimizer state.
+Sparse L1 can regress dense early nets by about 1\%. Quantization fusion, separate bias reductions,
+and forced NCCL protocols did not yield useful whole-training gains. No strength claim is made.
+After rebase, each branch passes 47 local CPU tests (59 skipped). GPU timings predate the
+history rewrite; measured runtime sources are preserved.
+
+\sect{Branches and evidence}
+\begin{tabularx}{\linewidth}{@{}p{62mm}Y@{}}
+\texttt{optimize/4xh100-no-loader} & GPU/DDP work, baseline loader launch settings.\\
+\texttt{optimize/4xh100-with-loader} & Adds separate BMI2, allocation-reuse, and staging-thread commits.\\
+\end{tabularx}
+Both are based on master \texttt{aa2fff2}; upstream HyperLogLog changes remain in both.
+Added Markdown reports remain untracked and unstaged.
+
+{\small\raggedright Evidence: \path{docs/benchmarks/h100-followup-2026-09-26/}.\\Workload:
+\href{https://github.com/vondele/nettest/blob/9bc8d4f4f89b9126079176dfdcd901d7bf294f7d/threats.yaml}{nettest threats.yaml}.
+Source: \texttt{h100-improvements.tex}.}
+\end{document}
