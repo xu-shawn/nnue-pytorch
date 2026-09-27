@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 import torch
@@ -42,6 +43,19 @@ def test_inf_train_loss_stops_training():
     assert callback.nan_detected
 
 
+def test_deferred_check_remembers_nonfinite_loss():
+    trainer = _make_trainer()
+    trainer.log_every_n_steps = 4
+    trainer.num_training_batches = 4
+    callback = TerminateOnNaN()
+    for i, loss in enumerate([float("nan"), 1.0, 1.0, 1.0]):
+        callback.on_train_batch_end(
+            trainer, batch_idx=i, outputs={"loss": torch.tensor(loss)}
+        )
+        assert trainer.should_stop == (i == 3)
+    assert callback.nan_detected
+
+
 def test_nan_validation_loss_stops_training():
     trainer = _make_trainer()
     callback = TerminateOnNaN()
@@ -77,5 +91,24 @@ def test_distributed_nan_aggregates_across_ranks():
     trainer = _make_trainer(world_size=2, rank=0)
     callback = TerminateOnNaN()
     callback.on_train_batch_end(trainer, outputs={"loss": torch.tensor(float("nan"))})
+    assert trainer.should_stop
+    assert callback.nan_detected
+
+
+def test_finite_rank_participates_in_distributed_nan_check():
+    trainer = _make_trainer(world_size=4)
+    callback = TerminateOnNaN()
+
+    def reduce(tensor, op):
+        if op == torch.distributed.ReduceOp.MIN:
+            tensor.fill_(False)  # Another rank reported a non-finite loss.
+
+    with (
+        patch("trainer.callbacks.dist.is_initialized", return_value=True),
+        patch("trainer.callbacks.dist.all_reduce", side_effect=reduce) as collective,
+    ):
+        callback.on_train_batch_end(trainer, outputs={"loss": torch.tensor(1.0)})
+
+    assert collective.call_count == 2
     assert trainer.should_stop
     assert callback.nan_detected
