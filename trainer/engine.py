@@ -95,7 +95,7 @@ class SimpleTrainer:
         rank: int,
         world_size: int,
         local_rank: int,
-        ddp_bucket_cap_mb: int = 50,
+        ddp_bucket_cap_mb: int = 400,
         mixed_precision: bool = False,
     ):
         if ddp_bucket_cap_mb <= 0:

@@ -66,8 +66,8 @@ class TrainingConfig:
     process_group_backend: Literal["nccl", "gloo", "mpi"] | None = None
     """Process group backend for DDP. None picks nccl for CUDA, gloo for CPU."""
 
-    ddp_bucket_cap_mb: int = 50
-    """DDP gradient bucket capacity in MiB. Larger buckets can reduce collective overhead."""
+    ddp_bucket_cap_mb: int = 400
+    """DDP gradient bucket capacity in MiB. Default tuned for four-H100 training."""
 
     seed: int = 42
     """Torch seed to use."""
