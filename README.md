@@ -70,6 +70,21 @@ Hard way: [wiki](https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-t
 
 Easier way: [wiki](https://github.com/official-stockfish/nnue-pytorch/wiki/Basic-training-procedure-(easy_train.py))
 
+### Experimental FP16 branch
+
+This branch enables CUDA mixed-precision training by default. Dense matmuls and the
+feature-transformer forward weight buffer use FP16. FT sums and gradient atomics,
+master parameters, optimizer moments, activation quantization and loss calculations
+remain FP32. Keeping FP32 master state preserves small optimizer updates; this is
+not an all-FP16 optimizer.
+
+Dynamic loss scaling is saved in checkpoints. Gradient clipping happens after
+unscaling, and overflow skips both the update and its per-update learning-rate step.
+Existing FP32 checkpoints remain loadable. CPU and MPS retain their usual precision.
+The FP16 path changes rounding and has not been validated for playing strength.
+Broad autocast was slower than FP32 in the four-H100 benchmarks; this branch is
+for precision experiments, not the recommended throughput configuration.
+
 ## Logging
 
 TODO: Move to wiki. Add setup for easy_train.py

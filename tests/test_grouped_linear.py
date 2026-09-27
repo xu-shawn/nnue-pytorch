@@ -95,6 +95,9 @@ def test_grouped_fallback(device, case, monkeypatch):
             weight = layer.linear.weight + layer.factorized_linear.weight.repeat(buckets, 1)
             bias = layer.linear.bias + layer.factorized_linear.bias.repeat(buckets)
             expected = layer.select_output(torch.nn.functional.linear(x, weight, bias), indices)
+            if device == "cuda":
+                # CUDA GEMM is half precision; following quantization uses FP32.
+                expected = expected.float()
         else:
             expected = _reference(layer, x, indices)
     assert actual.dtype == expected.dtype

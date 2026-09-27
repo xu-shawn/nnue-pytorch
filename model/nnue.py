@@ -37,6 +37,9 @@ def remap_tablebase_score(
 
 
 def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
+    # Sigmoid differences and the fractional power loss need FP32 range.
+    if scorenet.dtype in (torch.float16, torch.bfloat16):
+        scorenet = scorenet.float()
     score = remap_tablebase_score(
         score,
         base=loss_params.tb_remap_base,

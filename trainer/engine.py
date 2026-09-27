@@ -96,6 +96,7 @@ class SimpleTrainer:
         world_size: int,
         local_rank: int,
         ddp_bucket_cap_mb: int = 50,
+        mixed_precision: bool = True,
     ):
         if ddp_bucket_cap_mb <= 0:
             raise ValueError("ddp_bucket_cap_mb must be positive.")
@@ -119,6 +120,12 @@ class SimpleTrainer:
             self.logger = logger
 
         self.device = torch.device(device)
+        # FP32 parameters/Adam moments preserve updates below one FP16 ULP.
+        # Loss scaling protects intermediate FP16 backward values.
+        self.mixed_precision = mixed_precision and self.device.type == "cuda"
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.mixed_precision)
+        self.optimizer_steps_skipped = 0
+        self._last_scale = self.scaler.get_scale()
         self.rank = rank
         self.world_size = world_size
         self.local_rank = local_rank
@@ -230,6 +237,7 @@ class SimpleTrainer:
             "global_step": self.global_step,
             "state_dict": unwrapped.state_dict(),
             "lr_schedulers": [sch.state_dict() for sch in self._schedulers],
+            "grad_scaler": self.scaler.state_dict(),
         }
 
         # Model-level hook (e.g. lambda/optimizer state and eval-mode swaps).
@@ -251,6 +259,9 @@ class SimpleTrainer:
 
         unwrapped = _unwrap_module(self.model)
         unwrapped.load_state_dict(checkpoint["state_dict"])
+        if self.mixed_precision and checkpoint.get("grad_scaler"):
+            self.scaler.load_state_dict(checkpoint["grad_scaler"])
+            self._last_scale = self.scaler.get_scale()
         self.current_epoch = checkpoint.get("epoch", 0)
         self.global_step = checkpoint.get("global_step", 0)
 
@@ -302,25 +313,33 @@ class SimpleTrainer:
                 self.model.on_train_batch_start(batch, batch_idx)
             self._call_callbacks("on_train_batch_start", self, batch, batch_idx)
 
-            outputs = self._training_step(batch)
+            with torch.autocast("cuda", dtype=torch.float16, enabled=self.mixed_precision):
+                outputs = self._training_step(batch)
             loss = outputs["loss"]
 
             self.optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
 
             if self.gradient_clip_val is not None and self.gradient_clip_val > 0:
                 torch.nn.utils.clip_grad_norm_(
                     self.model.parameters(), self.gradient_clip_val
                 )
 
-            self.optimizer.step()
+            # An overflow skips AdamW; keep update-based schedules aligned.
+            previous_scale = self._last_scale
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self._last_scale = self.scaler.get_scale()
+            step_succeeded = self._last_scale >= previous_scale
+            self.optimizer_steps_skipped += not step_succeeded
 
             # Step OneCycleLR-style schedulers every optimizer step.
             for sch in self._schedulers:
-                if is_one_cycle(sch):
+                if step_succeeded and is_one_cycle(sch):
                     sch.step()
 
-            self.global_step += 1
+            self.global_step += step_succeeded
 
             # Store the raw loss tensor (GPU).  Only convert to float
             # when logging is due or when a callback needs the scalar.
@@ -382,7 +401,8 @@ class SimpleTrainer:
 
                 self._call_callbacks("on_validation_batch_start", self, batch, batch_idx)
 
-                outputs = self.model.val_step(batch, self.current_epoch, self.global_step)
+                with torch.autocast("cuda", dtype=torch.float16, enabled=self.mixed_precision):
+                    outputs = self.model.val_step(batch, self.current_epoch, self.global_step)
                 total_val_loss += float(outputs["val_loss"])
                 num_val_batches += 1
 
