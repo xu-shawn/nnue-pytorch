@@ -89,6 +89,7 @@ class FactorizedStackedLinear(StackedLinear):
 
         self.factorized_linear = nn.Linear(in_features, out_features)
         self.use_grouped = False
+        self.use_sparse = False
         self.zero_virtual_weights()
 
     def forward(self, x: torch.Tensor, ls_indices: torch.Tensor, fake_quantize_weights: bool=False) -> torch.Tensor:
@@ -108,7 +109,8 @@ class FactorizedStackedLinear(StackedLinear):
                 and self.count == 8 and x.shape[0] > 0):
             if grouped_l1 is None:
                 raise RuntimeError("--grouped-l1 requires CuPy and Triton on CUDA.")
-            return grouped_l1(x, merged_weight, merged_bias, ls_indices)
+            return grouped_l1(x, merged_weight, merged_bias, ls_indices,
+                              sparse=getattr(self, "use_sparse", False))
 
         stacked_output = F.linear(x, merged_weight, merged_bias)
 

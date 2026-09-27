@@ -10,6 +10,9 @@ class LayerStacksConfig:
     grouped_l1: bool = False
     """Use the CUDA bucketed 1024→32 first layer, tuned for H100 training."""
 
+    sparse_l1: bool = False
+    """Use NNZ-compacted forward with bucketed backward; best for mature sparse nets."""
+
     L1: Annotated[int, tyro.conf.arg(name="l1")] = 1024
     """Size of first hidden layer."""
     L2: Annotated[int, tyro.conf.arg(name="l2")] = 32
