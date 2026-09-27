@@ -11,7 +11,6 @@ from model.modules import stacked_linear
 from model.modules.stacked_linear import FactorizedStackedLinear, grouped_l1
 from model.quantize import QuantizationConfig, QuantizationManager
 
-
 CUDA_AVAILABLE = torch.cuda.is_available() and torch.version.hip is None
 OPTIMIZED_AVAILABLE = (
     CUDA_AVAILABLE
