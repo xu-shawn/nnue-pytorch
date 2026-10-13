@@ -525,6 +525,30 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
     return std::make_shared<ComposedFeatureExtractor>(std::move(components));
 }
 
+// Zone of the side to move's king, seen from its own side (a1 = 0) with the files mirrored:
+// 0: a1 b1 g1 h1, 1: c1 d1 e1 f1, 2: second rank, 3: third rank and beyond.
+// It is packed above the two queen bits of queen_bucket.
+// clang-format off
+static constexpr int KingZones[64] = {
+  0, 0, 1, 1, 1, 1, 0, 0,
+  2, 2, 2, 2, 2, 2, 2, 2,
+  3, 3, 3, 3, 3, 3, 3, 3,
+  3, 3, 3, 3, 3, 3, 3, 3,
+  3, 3, 3, 3, 3, 3, 3, 3,
+  3, 3, 3, 3, 3, 3, 3, 3,
+  3, 3, 3, 3, 3, 3, 3, 3,
+  3, 3, 3, 3, 3, 3, 3, 3
+};
+// clang-format on
+
+static int king_zone(const Position& pos) {
+    const auto stm = pos.sideToMove();
+    auto       ksq = pos.kingSquare(stm);
+    if (stm == Color::Black)
+        ksq = ksq.flippedVertically();
+    return KingZones[static_cast<int>(ksq)];
+}
+
 // ---------------------------------------------------------
 // Class Implementations
 // ---------------------------------------------------------
@@ -642,7 +666,8 @@ void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingD
     score[i]        = e.score;
     piece_count[i]  = e.pos.piecesBB().count();
     const auto stm  = e.pos.sideToMove();
-    queen_bucket[i] = (e.pos.piecesBB(Piece(PieceType::Queen, stm)).any() ? 2 : 0)
+    queen_bucket[i] = king_zone(e.pos) * 4
+                    | (e.pos.piecesBB(Piece(PieceType::Queen, stm)).any() ? 2 : 0)
                     | (e.pos.piecesBB(Piece(PieceType::Queen, !stm)).any() ? 1 : 0);
     fill_features(fs, i, e);
 }
