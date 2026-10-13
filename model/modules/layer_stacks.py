@@ -29,9 +29,9 @@ class LayerStacks(nn.Module):
         )
         self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
 
-        self.output = StackedLinear(
-            self.L2 * 2 + self.L3 * 2, 1, count, quantization, "ls_output"
-        )
+        # The output layer sees only the second hidden layer: no concatenated first-layer
+        # activations and no direct path from the first layer to the output.
+        self.output = StackedLinear(self.L3 * 2, 1, count, quantization, "ls_output")
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
@@ -44,9 +44,6 @@ class LayerStacks(nn.Module):
         fake_quantize_weights: bool = True,
     ):
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
-
-        # Extract the short-path skip connection before fake quantization
-        l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
         l1x_ = l1c_
 
         l1_sqr = torch.pow(l1x_, 2.0)
@@ -76,14 +73,7 @@ class LayerStacks(nn.Module):
         l2x_ = torch.cat([l2_sqr, l2x_], dim=1)
         l2x_ = self.quantization.clip_ls_act(l2x_)
 
-        l3_input = torch.cat([l1x_, l2x_], dim=1)
-
-        l3c_ = self.output(l3_input, ls_indices, fake_quantize_weights)
-
-        if fake_quantize_acts:
-            l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
-
-        l3x_ = l3c_ + l1x_out
+        l3x_ = self.output(l2x_, ls_indices, fake_quantize_weights)
         if fake_quantize_acts:
             l3x_ = self.quantization.fake_quantize_output(l3x_)
 
