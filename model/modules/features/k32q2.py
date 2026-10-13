@@ -55,6 +55,11 @@ class K32Q2(InputFeature):
 
         self.reset_parameters()
 
+    @classmethod
+    def own_king_square(cls, bucket: int) -> int:
+        """Oriented own king square of a king/queen bucket."""
+        return InverseKingBuckets[bucket // cls.NUM_QUEEN_BUCKETS]
+
     def merged_weight(self) -> torch.Tensor:
         return self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
 
@@ -114,7 +119,7 @@ class K32Q2(InputFeature):
             own_king_src = src_offset + 10 * 64
             opp_king_src = src_offset + 11 * 64
             dst_king = dst_offset + 10 * 64
-            ksq = InverseKingBuckets[b // self.NUM_QUEEN_BUCKETS]
+            ksq = self.own_king_square(b)
 
             export[dst_king : dst_king + 64] = coalesced[
                 opp_king_src : opp_king_src + 64
@@ -144,7 +149,7 @@ class K32Q2(InputFeature):
 
             # Split merged king block back into p_idx 10 and 11
             src_king = src_offset + 10 * 64
-            ksq = InverseKingBuckets[b // self.NUM_QUEEN_BUCKETS]
+            ksq = self.own_king_square(b)
 
             # Own king: only weight at ksq matters (rest stays zero)
             expanded[dst_offset + 10 * 64 + ksq] = export_weight[src_king + ksq]
