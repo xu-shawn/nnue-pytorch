@@ -525,6 +525,21 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
     return std::make_shared<ComposedFeatureExtractor>(std::move(components));
 }
 
+// Pawn bucket: the number of thresholds the pawn count exceeds. The thresholds depend on the
+// piece-count bucket ((piece count - 1) / 4), because the pawn count tracks the piece count
+// closely; they are the quartiles of the pawn count within each piece-count bucket.
+// It is packed above the two queen bits of queen_bucket.
+static constexpr int PawnThresholds[8][3] = {{0, 1, 2},   {1, 2, 3},    {4, 5, 6},    {7, 8, 9},
+                                             {9, 10, 11}, {10, 11, 12}, {12, 13, 14}, {13, 14, 15}};
+
+static int pawn_bucket(const Position& pos) {
+    const int pawns = (pos.piecesBB(Piece(PieceType::Pawn, Color::White))
+                       | pos.piecesBB(Piece(PieceType::Pawn, Color::Black)))
+                        .count();
+    const auto& thresholds = PawnThresholds[(pos.piecesBB().count() - 1) / 4];
+    return (pawns > thresholds[0]) + (pawns > thresholds[1]) + (pawns > thresholds[2]);
+}
+
 // ---------------------------------------------------------
 // Class Implementations
 // ---------------------------------------------------------
@@ -642,7 +657,8 @@ void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingD
     score[i]        = e.score;
     piece_count[i]  = e.pos.piecesBB().count();
     const auto stm  = e.pos.sideToMove();
-    queen_bucket[i] = (e.pos.piecesBB(Piece(PieceType::Queen, stm)).any() ? 2 : 0)
+    queen_bucket[i] = pawn_bucket(e.pos) * 4
+                    | (e.pos.piecesBB(Piece(PieceType::Queen, stm)).any() ? 2 : 0)
                     | (e.pos.piecesBB(Piece(PieceType::Queen, !stm)).any() ? 1 : 0);
     fill_features(fs, i, e);
 }
