@@ -24,7 +24,7 @@ for _sq, _bucket in enumerate(KingBuckets):
 
 
 class K32Q2(InputFeature):
-    HASH = 0x32B5E284
+    HASH = 0x32B5E285
     FEATURE_NAME = "K32Q2^"
     INPUT_FEATURE_NAME = "K32Q2"
     MAX_ACTIVE_FEATURES = 32
@@ -40,7 +40,7 @@ class K32Q2(InputFeature):
 
     # Export size uses 11 piece types (704 * 64 = 45,056)
     NUM_REAL_FEATURES = 704 * NUM_BUCKETS  # 45,056
-    EXPORT_WEIGHT_DTYPE = torch.int8
+    EXPORT_WEIGHT_DTYPE = torch.int16
 
     def __init__(self, num_outputs: int):
         super().__init__()
