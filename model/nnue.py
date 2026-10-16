@@ -189,6 +189,20 @@ class NNUE(nn.Module):
                 "weight_decay": 0.0,
             },
             {
+                "params": [self.model.layer_stacks.l3.linear.weight]
+                if self.model.layer_stacks.extra_layer
+                else [],
+                "lr": LRs[6],
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.layer_stacks.l3.linear.bias]
+                if self.model.layer_stacks.extra_layer
+                else [],
+                "lr": LRs[7],
+                "weight_decay": 0.0,
+            },
+            {
                 "params": [self.model.layer_stacks.output.linear.weight],
                 "lr": LRs[8],
                 "weight_decay": dense_wd,
