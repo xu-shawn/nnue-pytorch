@@ -9,13 +9,19 @@ from .full_threats import FullThreats
 from .halfka_v2_hm import HalfKav2Hm
 from .input_feature import InputFeature
 from .k32q2 import K32Q2
+from .passed_48 import Passed48
+from .pawn_push import PawnPush
 from .pp_3wide import PP3Wide
+from .promo_atk import PromoAtk
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
     "K32Q2^": K32Q2,
     "Full_Threats": FullThreats,
     "PP_3Wide": PP3Wide,
+    "Pawn_Push": PawnPush,
+    "Promo_Atk": PromoAtk,
+    "Passed_48": Passed48,
 }
 
 DEFAULT_FEATURES = "Full_Threats+PP_3Wide+K32Q2^"
@@ -60,6 +66,9 @@ __all__ = [
     "HalfKav2Hm",
     "InputFeature",
     "PP3Wide",
+    "Passed48",
+    "PawnPush",
+    "PromoAtk",
     "add_feature_args",
     "get_available_features",
     "get_feature_cls",

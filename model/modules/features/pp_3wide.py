@@ -8,7 +8,10 @@ class PP3Wide(InputFeature):
     HASH = 0x86F2B1DD
     FEATURE_NAME = "PP_3Wide"
     INPUT_FEATURE_NAME = "PP_3Wide"
-    MAX_ACTIVE_FEATURES = 128
+    # Real positions have at most about 40 pawn pairs. 112 leaves room for Pawn_Push or
+    # Passed_48 (16 slots each) within the 288 active features the GPU feature-transformer
+    # kernels are tuned for.
+    MAX_ACTIVE_FEATURES = 112
 
     NUM_INPUTS = 4560
     NUM_REAL_FEATURES = 4560

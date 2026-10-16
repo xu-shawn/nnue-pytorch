@@ -362,12 +362,16 @@ struct FullThreatsExtractor: IFeatureExtractor {
     }
 };
 
+// MAX_ACTIVE_FEATURES only reserves batch slots; real positions have at most about 40
+// pawn pairs. 112 leaves room for Pawn_Push or Passed_48 (16 slots each), so that
+// Full_Threats + PP_3Wide + one of them + K32Q2 reserve 288 slots, the width the GPU
+// feature-transformer kernels are tuned for.
 struct PP_3Wide {
     static constexpr std::string_view NAME = "PP_3Wide";
 
     static constexpr int PAWN_IDS            = 2 * 48;
     static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int MAX_ACTIVE_FEATURES = 112;
 
     static int make_pawn_id(Color color, Square square) {
         return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
@@ -443,6 +447,179 @@ struct PP_3WideExtractor: IFeatureExtractor {
     }
 };
 
+// The features below share the orientation of Full_Threats and PP_3Wide: squares are
+// xor-ed with FullThreats::OrientTBL[perspective][ksq] and colors are relative to the
+// perspective.
+
+// A pawn whose push square holds a non-pawn piece of either color (pawns blocked by
+// pawns are covered by PP_3Wide). Index: pawn color, blocker piece (5 types per color),
+// pawn square.
+struct PawnPush {
+    static constexpr std::string_view NAME = "Pawn_Push";
+
+    static constexpr int INPUTS              = 2 * 10 * 48;
+    static constexpr int MAX_ACTIVE_FEATURES = 16;
+
+    static int
+    make_index(Color perspective, Color pawn_color, Square from, Piece blocker, int orient) {
+        int kind = (static_cast<int>(blocker.color()) ^ static_cast<int>(perspective)) * 5
+                 + static_cast<int>(blocker.type()) - static_cast<int>(PieceType::Knight);
+        int color_oriented = static_cast<int>(pawn_color) ^ static_cast<int>(perspective);
+        return (color_oriented * 10 + kind) * 48 + (static_cast<int>(from) ^ orient) - 8;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        auto allPawns = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+        auto blockers = pos.piecesBB() & ~allPawns;
+        int  k        = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            Bitboard pawns = pos.piecesBB(Piece(PieceType::Pawn, c));
+            int      push  = c == Color::White ? 8 : -8;
+            for (Square to : pawns.shiftedVertically(c == Color::White ? 1 : -1) & blockers)
+                features[k++] = make_index(color, c, Square(static_cast<int>(to) - push),
+                                           pos.pieceAt(to), orient);
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PawnPushExtractor: IFeatureExtractor {
+    int inputs() const override { return PawnPush::INPUTS; }
+    int max_active_features() const override { return PawnPush::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PawnPush::fill_features_sparse(e, features, color);
+    }
+};
+
+// Attackers of the promotion square of every pawn on its 7th rank, counted per attacker
+// kind relative to the pawn's color: own pawn, knight, bishop, rook, queen, king, then
+// enemy knight, bishop, rook, queen, king (enemy pawns cannot attack it). Each kind has
+// two thermometer levels, one or more attackers and two or more.
+// Index: ((pawn color * 8 + promotion file) * 11 + kind) * 2 + level.
+// A pawn has at most 20 features (11 own and 9 enemy levels) and at most 16 pawns
+// stand on their 7th rank, hence 320 slots; real positions use about 6.
+struct PromoAtk {
+    static constexpr std::string_view NAME = "Promo_Atk";
+
+    static constexpr int KINDS               = 11;
+    static constexpr int INPUTS              = 2 * 8 * KINDS * 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 16 * 20;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   flip =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)])
+          & 7;
+        int k = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            Bitboard pawns   = pos.piecesBB(Piece(PieceType::Pawn, c));
+            Bitboard seventh = Bitboard::rank(c == Color::White ? rank7 : rank2);
+
+            for (Square from : pawns& seventh)
+            {
+                Square   to    = Square(static_cast<int>(from) + (c == Color::White ? 8 : -8));
+                Bitboard own   = pos.attackers(to, c);
+                Bitboard enemy = pos.attackers(to, !c);
+                int      base  = ((static_cast<int>(c) ^ static_cast<int>(color)) * 8
+                            + (static_cast<int>(to.file()) ^ flip))
+                         * KINDS;
+
+                int counts[KINDS];
+                for (int t = 0; t < 6; ++t)
+                    counts[t] = (own & pos.piecesBB(Piece(PieceType(t), c))).count();
+                for (int t = 1; t < 6; ++t)
+                    counts[5 + t] = (enemy & pos.piecesBB(Piece(PieceType(t), !c))).count();
+
+                for (int kind = 0; kind < KINDS; ++kind)
+                    for (int level = 0; level < std::min(counts[kind], 2); ++level)
+                        features[k++] = (base + kind) * 2 + level;
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PromoAtkExtractor: IFeatureExtractor {
+    int inputs() const override { return PromoAtk::INPUTS; }
+    int max_active_features() const override { return PromoAtk::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PromoAtk::fill_features_sparse(e, features, color);
+    }
+};
+
+// The perspective's own passed pawns: no enemy pawn ahead on the same or an adjacent file.
+// Index: pawn square (ranks 2 to 7).
+struct Passed48 {
+    static constexpr std::string_view NAME = "Passed_48";
+
+    static constexpr int INPUTS              = 48;
+    static constexpr int MAX_ACTIVE_FEATURES = 16;
+
+    static std::uint64_t passed_pawns(Color c, std::uint64_t white, std::uint64_t black) {
+        constexpr std::uint64_t FileA = 0x0101010101010101ULL;
+        constexpr std::uint64_t FileH = FileA << 7;
+
+        std::uint64_t enemy = c == Color::White ? black : white;
+        std::uint64_t span  = enemy | ((enemy << 1) & ~FileA) | ((enemy >> 1) & ~FileH);
+        std::uint64_t fill;
+        if (c == Color::White)
+        {
+            fill = span >> 8;
+            fill |= fill >> 8;
+            fill |= fill >> 16;
+            fill |= fill >> 32;
+        }
+        else
+        {
+            fill = span << 8;
+            fill |= fill << 8;
+            fill |= fill << 16;
+            fill |= fill << 32;
+        }
+        return (c == Color::White ? white : black) & ~fill;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        auto passed = Bitboard::fromBits(
+          passed_pawns(color, pos.piecesBB(whitePawn).bits(), pos.piecesBB(blackPawn).bits()));
+        int k = 0;
+
+        for (Square sq : passed)
+            features[k++] = (static_cast<int>(sq) ^ orient) - 8;
+
+        return {k, INPUTS};
+    }
+};
+
+struct Passed48Extractor: IFeatureExtractor {
+    int inputs() const override { return Passed48::INPUTS; }
+    int max_active_features() const override { return Passed48::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return Passed48::fill_features_sparse(e, features, color);
+    }
+};
+
 struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
     int                                             m_inputs;
@@ -493,6 +670,12 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<FullThreatsExtractor>();
     if (name == "PP_3Wide")
         return std::make_unique<PP_3WideExtractor>();
+    if (name == "Pawn_Push")
+        return std::make_unique<PawnPushExtractor>();
+    if (name == "Promo_Atk")
+        return std::make_unique<PromoAtkExtractor>();
+    if (name == "Passed_48")
+        return std::make_unique<Passed48Extractor>();
     return nullptr;
 }
 
