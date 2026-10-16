@@ -6,6 +6,7 @@
 #include <future>
 #include <random>
 #include <cstring>
+#include <cassert>
 #include <cmath>
 
 #include "lib/rng.h"
@@ -562,6 +563,99 @@ struct PromoAtkExtractor: IFeatureExtractor {
     }
 };
 
+// Like Promo_Atk, but every attacker of a promotion square is its own feature, indexed by
+// pawn color, promotion file, attacker kind (as in Promo_Atk) and attacker square. Only
+// squares from which that kind can attack the promotion square get an index (1620 total).
+struct PromoAtkSq {
+    static constexpr std::string_view NAME = "Promo_AtkSq";
+
+    static constexpr int KINDS = 11;
+    // A promotion square has at most 17 attackers (2 pawns, 8 knights, 5 sliders on the
+    // rays that stay on the board, 2 kings) and at most 16 pawns stand on their 7th rank.
+    static constexpr int MAX_ACTIVE_FEATURES = 16 * 17;
+
+    struct Table {
+        std::uint64_t reach[2][8][KINDS];
+        int           offset[2][8][KINDS];
+        int           total;
+    };
+
+    // Indexed by pawn color relative to the perspective (0: the perspective's pawns, which
+    // promote on the oriented 8th rank), oriented promotion file and kind.
+    static constexpr Table table = []() {
+        Table          t{};
+        constexpr auto pseudo = bb::detail::generatePseudoAttacks();
+        int            offset = 0;
+        for (int c = 0; c < 2; ++c)
+            for (int f = 0; f < 8; ++f)
+                for (int k = 0; k < KINDS; ++k)
+                {
+                    Square        to = Square(File(f), c == 0 ? rank8 : rank1);
+                    std::uint64_t reach;
+                    if (k == 0)
+                        reach = bb::pawnAttacks(Bitboard::square(to),
+                                                c == 0 ? Color::Black : Color::White)
+                                  .bits();
+                    else
+                        reach = pseudo[PieceType(k <= 5 ? k : k - 5)][to].bits();
+                    t.reach[c][f][k]  = reach;
+                    t.offset[c][f][k] = offset;
+                    offset += Bitboard::fromBits(reach).count();
+                }
+        t.total = offset;
+        return t;
+    }();
+
+    static constexpr int INPUTS = table.total;
+    static_assert(INPUTS == 1620);
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        int k = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            Bitboard pawns   = pos.piecesBB(Piece(PieceType::Pawn, c));
+            Bitboard seventh = Bitboard::rank(c == Color::White ? rank7 : rank2);
+            int      rel     = static_cast<int>(c) ^ static_cast<int>(color);
+
+            for (Square from : pawns& seventh)
+            {
+                Square to   = Square(static_cast<int>(from) + (c == Color::White ? 8 : -8));
+                int    file = (static_cast<int>(to) ^ orient) & 7;
+
+                for (Color side : {c, !c})
+                    for (Square a : pos.attackers(to, side))
+                    {
+                        int type = static_cast<int>(pos.pieceAt(a).type());
+                        int kind = side == c ? type : type + 5;
+                        int a_o  = static_cast<int>(a) ^ orient;
+                        assert(table.reach[rel][file][kind] >> a_o & 1);
+                        features[k++] =
+                          table.offset[rel][file][kind]
+                          + Bitboard::fromBits(table.reach[rel][file][kind] & ((1ULL << a_o) - 1))
+                              .count();
+                    }
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PromoAtkSqExtractor: IFeatureExtractor {
+    int inputs() const override { return PromoAtkSq::INPUTS; }
+    int max_active_features() const override { return PromoAtkSq::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PromoAtkSq::fill_features_sparse(e, features, color);
+    }
+};
+
 // The perspective's own passed pawns: no enemy pawn ahead on the same or an adjacent file.
 // Index: pawn square (ranks 2 to 7).
 struct Passed48 {
@@ -674,6 +768,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PawnPushExtractor>();
     if (name == "Promo_Atk")
         return std::make_unique<PromoAtkExtractor>();
+    if (name == "Promo_AtkSq")
+        return std::make_unique<PromoAtkSqExtractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;

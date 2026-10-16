@@ -13,6 +13,7 @@ from .passed_48 import Passed48
 from .pawn_push import PawnPush
 from .pp_3wide import PP3Wide
 from .promo_atk import PromoAtk
+from .promo_atk_sq import PromoAtkSq
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
@@ -21,6 +22,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "PP_3Wide": PP3Wide,
     "Pawn_Push": PawnPush,
     "Promo_Atk": PromoAtk,
+    "Promo_AtkSq": PromoAtkSq,
     "Passed_48": Passed48,
 }
 
@@ -69,6 +71,7 @@ __all__ = [
     "Passed48",
     "PawnPush",
     "PromoAtk",
+    "PromoAtkSq",
     "add_feature_args",
     "get_available_features",
     "get_feature_cls",
