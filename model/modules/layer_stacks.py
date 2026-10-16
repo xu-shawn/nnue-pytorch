@@ -42,16 +42,24 @@ class LayerStacks(nn.Module):
         #   att32p  as att32, but the fresh neurons come from the side to move's 768
         #           piece-square inputs through a 768 -> 32 layer shared by all stacks
         #           (an extra accumulator in the engine)
+        #   att32pu as att32p, but each layer stack has its own 768 -> 32 layer (int8,
+        #           computed from the ~32 active inputs at evaluation in the engine)
         self.variant = os.environ.get("NNUE_LS_VARIANT", "base")
         v = self.variant
-        assert v in ("base", "noskip", "res64", "rec64", "att32", "att32p") or (
-            v.startswith("deep") and v[4:].isdigit()
-        ), v
+        assert v in (
+            "base",
+            "noskip",
+            "res64",
+            "rec64",
+            "att32",
+            "att32p",
+            "att32pu",
+        ) or (v.startswith("deep") and v[4:].isdigit()), v
         if v.startswith("deep"):
             extra = int(v[4:])
         elif v == "res64":
             extra = 2
-        elif v in ("att32", "att32p"):
+        elif v in ("att32", "att32p", "att32pu"):
             extra = 1
         else:
             extra = 0
@@ -61,8 +69,10 @@ class LayerStacks(nn.Module):
         )
         # Fresh neurons from the feature transformer output, one set per att32 block
         self.fresh = nn.ModuleList(
-            StackedLinear(self.L1, self.L3, count, quantization, "ls_l1")
-            for _ in range(2 if v == "att32" else 0)
+            StackedLinear(
+                self.L1 if v == "att32" else 768, self.L3, count, quantization, "ls_l1"
+            )
+            for _ in range(2 if v in ("att32", "att32pu") else 0)
         )
         self.psq_fresh = nn.ModuleList(
             nn.Linear(768, self.L3) for _ in range(2 if v == "att32p" else 0)
@@ -116,6 +126,8 @@ class LayerStacks(nn.Module):
             s = self._crelu(l1c_, fq_a)
             if v == "att32":
                 fresh_out = [layer(x, ls_indices, fq_w) for layer in self.fresh]
+            elif v == "att32pu":
+                fresh_out = [layer(psq, ls_indices, fq_w) for layer in self.fresh]
             else:
                 fresh_out = [layer(psq) for layer in self.psq_fresh]
             for layer, f_out in zip([self.l2, *self.extra], fresh_out):
