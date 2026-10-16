@@ -211,6 +211,16 @@ class NNUE(nn.Module):
                 "weight_decay": dense_wd,
             },
             {
+                "params": [layer.weight for layer in self.model.layer_stacks.psq_fresh],
+                "lr": LRs[4],
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [layer.bias for layer in self.model.layer_stacks.psq_fresh],
+                "lr": LRs[5],
+                "weight_decay": 0.0,
+            },
+            {
                 "params": [
                     layer.linear.bias for layer in self.model.layer_stacks.fresh
                 ],

@@ -30,6 +30,16 @@ class NNUEModel(nn.Module):
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
+        # Depth experiments: the att32p layer stacks also see the side to move's 768
+        # piece-square inputs, taken from the K32Q2 indices modulo 768
+        self.psq_offset = None
+        offset = 0
+        for f in self.input.features:
+            if f.FEATURE_NAME.startswith("K32Q2"):
+                self.psq_offset = offset
+                self.psq_span = f.NUM_INPUTS
+            offset += f.NUM_INPUTS
+
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
         self.input.init_weights()
@@ -114,8 +124,17 @@ class NNUEModel(nn.Module):
             fake_quantize_acts,
             fake_quantize_weights,
         )
+        psq = None
+        if self.layer_stacks.variant == "att32p":
+            idx = torch.where(us.view(-1, 1) > 0.5, white_indices, black_indices).long()
+            rel = idx - self.psq_offset
+            valid = (idx >= 0) & (rel >= 0) & (rel < self.psq_span)
+            cols = torch.where(valid, rel % 768, torch.full_like(rel, 768))
+            psq = torch.zeros(idx.shape[0], 769, device=idx.device, dtype=l0_.dtype)
+            psq.scatter_(1, cols, 1.0)
+            psq = psq[:, :768]
         x = self.layer_stacks(
-            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights
+            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights, psq
         )
 
         return x

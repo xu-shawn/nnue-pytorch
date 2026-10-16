@@ -39,16 +39,19 @@ class LayerStacks(nn.Module):
         #   rec64   as res64 but one block (l2) applied 3 times
         #   att32   32-wide stream: s = clip(s + crelu(W act(s)) * crelu(V x)), where V
         #           derives 32 fresh neurons from the feature transformer output x, 2 blocks
+        #   att32p  as att32, but the fresh neurons come from the side to move's 768
+        #           piece-square inputs through a 768 -> 32 layer shared by all stacks
+        #           (an extra accumulator in the engine)
         self.variant = os.environ.get("NNUE_LS_VARIANT", "base")
         v = self.variant
-        assert v in ("base", "noskip", "res64", "rec64", "att32") or (
+        assert v in ("base", "noskip", "res64", "rec64", "att32", "att32p") or (
             v.startswith("deep") and v[4:].isdigit()
         ), v
         if v.startswith("deep"):
             extra = int(v[4:])
         elif v == "res64":
             extra = 2
-        elif v == "att32":
+        elif v in ("att32", "att32p"):
             extra = 1
         else:
             extra = 0
@@ -60,6 +63,9 @@ class LayerStacks(nn.Module):
         self.fresh = nn.ModuleList(
             StackedLinear(self.L1, self.L3, count, quantization, "ls_l1")
             for _ in range(2 if v == "att32" else 0)
+        )
+        self.psq_fresh = nn.ModuleList(
+            nn.Linear(768, self.L3) for _ in range(2 if v == "att32p" else 0)
         )
 
         self.output = StackedLinear(
@@ -89,7 +95,7 @@ class LayerStacks(nn.Module):
         return self.quantization.clip_ls_act(x)
 
     def _forward_variant(
-        self, x, ls_indices, fake_quantize_acts, fake_quantize_weights
+        self, x, ls_indices, fake_quantize_acts, fake_quantize_weights, psq=None
     ):
         fq_a, fq_w = fake_quantize_acts, fake_quantize_weights
         l1c_ = self.l1(x, ls_indices, fq_w)
@@ -108,8 +114,12 @@ class LayerStacks(nn.Module):
                 )
         else:  # att32
             s = self._crelu(l1c_, fq_a)
-            for layer, fresh in zip([self.l2, *self.extra], self.fresh):
-                g = self._crelu(fresh(x, ls_indices, fq_w), fq_a)
+            if v == "att32":
+                fresh_out = [layer(x, ls_indices, fq_w) for layer in self.fresh]
+            else:
+                fresh_out = [layer(psq) for layer in self.psq_fresh]
+            for layer, f_out in zip([self.l2, *self.extra], fresh_out):
+                g = self._crelu(f_out, fq_a)
                 u = self._crelu(layer(self._act(s, fq_a), ls_indices, fq_w), fq_a)
                 prod = u * g
                 if fq_a:
@@ -128,10 +138,11 @@ class LayerStacks(nn.Module):
         ls_indices: torch.Tensor,
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
+        psq: torch.Tensor | None = None,
     ):
         if self.variant != "base":
             return self._forward_variant(
-                x, ls_indices, fake_quantize_acts, fake_quantize_weights
+                x, ls_indices, fake_quantize_acts, fake_quantize_weights, psq
             )
 
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
