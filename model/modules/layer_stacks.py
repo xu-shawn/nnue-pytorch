@@ -29,14 +29,17 @@ class LayerStacks(nn.Module):
             2 * self.L1 // 2, self.L2, count, quantization, "ls_l1"
         )
         self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
-        # Proxy experiments: NNUE_EXTRA_LAYER=1 adds a second L3-wide hidden layer (same
-        # quantization as l2); the output layer then sees all three hidden activations.
-        self.extra_layer = os.environ.get("NNUE_EXTRA_LAYER", "0") == "1"
-        if self.extra_layer:
-            self.l3 = StackedLinear(self.L3 * 2, self.L3, count, quantization, "ls_l2")
+        # Proxy experiments: NNUE_EXTRA_LAYER=n adds n more L3-wide hidden layers (same
+        # quantization as l2); the output layer then sees all hidden activations.
+        self.num_extra = int(os.environ.get("NNUE_EXTRA_LAYER", "0"))
+        self.extra_layer = self.num_extra > 0
+        self.extra = nn.ModuleList(
+            StackedLinear(self.L3 * 2, self.L3, count, quantization, "ls_l2")
+            for _ in range(self.num_extra)
+        )
 
         self.output = StackedLinear(
-            self.L2 * 2 + self.L3 * 2 * (2 if self.extra_layer else 1),
+            self.L2 * 2 + self.L3 * 2 * (1 + self.num_extra),
             1,
             count,
             quantization,
@@ -86,18 +89,17 @@ class LayerStacks(nn.Module):
         l2x_ = torch.cat([l2_sqr, l2x_], dim=1)
         l2x_ = self.quantization.clip_ls_act(l2x_)
 
-        if self.extra_layer:
-            l3x_ = self.l3(l2x_, ls_indices, fake_quantize_weights)
-            l3_sqr = torch.pow(l3x_, 2.0)
+        hidden = [l1x_, l2x_]
+        for layer in self.extra:
+            hx_ = layer(hidden[-1], ls_indices, fake_quantize_weights)
+            h_sqr = torch.pow(hx_, 2.0)
             if fake_quantize_acts:
-                l3_sqr = self.quantization.fake_quantize_ls_act(l3_sqr)
-            l3_sqr = l3_sqr * (self.quantization.sqr_crelu_correction_factor)
+                h_sqr = self.quantization.fake_quantize_ls_act(h_sqr)
+            h_sqr = h_sqr * (self.quantization.sqr_crelu_correction_factor)
             if fake_quantize_acts:
-                l3x_ = self.quantization.fake_quantize_ls_act(l3x_)
-            l3x_ = self.quantization.clip_ls_act(torch.cat([l3_sqr, l3x_], dim=1))
-            l3_input = torch.cat([l1x_, l2x_, l3x_], dim=1)
-        else:
-            l3_input = torch.cat([l1x_, l2x_], dim=1)
+                hx_ = self.quantization.fake_quantize_ls_act(hx_)
+            hidden.append(self.quantization.clip_ls_act(torch.cat([h_sqr, hx_], dim=1)))
+        l3_input = torch.cat(hidden, dim=1)
 
         l3c_ = self.output(l3_input, ls_indices, fake_quantize_weights)
 

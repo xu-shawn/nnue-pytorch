@@ -183,17 +183,14 @@ class QuantizationManager:
                 "min_weight": -self.max_hidden_weight[2],
                 "max_weight": self.max_hidden_weight[2],
             },
-        ] + (
-            [
-                {
-                    "params": [model.layer_stacks.l3.linear.weight],
-                    "min_weight": -self.max_hidden_weight[1],
-                    "max_weight": self.max_hidden_weight[1],
-                }
-            ]
-            if model.layer_stacks.extra_layer
-            else []
-        )
+        ] + [
+            {
+                "params": [layer.linear.weight],
+                "min_weight": -self.max_hidden_weight[1],
+                "max_weight": self.max_hidden_weight[1],
+            }
+            for layer in model.layer_stacks.extra
+        ]
 
     def quantize_feature_transformer_weights(
         self,
