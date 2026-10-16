@@ -7,3 +7,4 @@ E Full_Threats+PP_3Wide+K32Q2^       32  int8    #494
 F Full_Threats+PP_3Wide+HalfKAv2_hm^ 8   int8    #502
 G Full_Threats+PP_3Wide+K32Q4^       32  int8    #508
 H Full_Threats+PP_3Wide+K32Q2^       128 int8    #509
+P Full_Threats+PP_3Wide+K32Q2P4^ 32  int8    K32Q2xPC4

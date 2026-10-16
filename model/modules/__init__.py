@@ -5,6 +5,7 @@ from .feature_transformer import (
 from .features import (
     K32Q2,
     K32Q4,
+    K32Q2P4,
     FeatureConfig,
     FullThreats,
     HalfKav2Hm,
@@ -18,6 +19,7 @@ from .layer_stacks import LayerStacks
 __all__ = [
     "K32Q2",
     "K32Q4",
+    "K32Q2P4",
     "ComposedFeatureTransformer",
     "FeatureConfig",
     "FullThreats",
