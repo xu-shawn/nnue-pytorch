@@ -188,6 +188,35 @@ class NNUE(nn.Module):
                 "lr": LRs[7],
                 "weight_decay": 0.0,
             },
+            # Depth experiments: extra hidden layers like l2, fresh-neuron layers like l1
+            {
+                "params": [
+                    layer.linear.weight for layer in self.model.layer_stacks.extra
+                ],
+                "lr": LRs[6],
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [
+                    layer.linear.bias for layer in self.model.layer_stacks.extra
+                ],
+                "lr": LRs[7],
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [
+                    layer.linear.weight for layer in self.model.layer_stacks.fresh
+                ],
+                "lr": LRs[4],
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [
+                    layer.linear.bias for layer in self.model.layer_stacks.fresh
+                ],
+                "lr": LRs[5],
+                "weight_decay": 0.0,
+            },
             {
                 "params": [self.model.layer_stacks.output.linear.weight],
                 "lr": LRs[8],

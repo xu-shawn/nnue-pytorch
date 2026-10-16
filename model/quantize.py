@@ -166,24 +166,42 @@ class QuantizationManager:
     def generate_weight_clipping_config(
         self, model: "NNUEModel"
     ) -> list[WeightClippingConfig]:
-        return [
-            {
-                "params": [model.layer_stacks.l1.linear.weight],
-                "min_weight": -self.max_hidden_weight[0],
-                "max_weight": self.max_hidden_weight[0],
-                "virtual_params": model.layer_stacks.l1.factorized_linear.weight,
-            },
-            {
-                "params": [model.layer_stacks.l2.linear.weight],
-                "min_weight": -self.max_hidden_weight[1],
-                "max_weight": self.max_hidden_weight[1],
-            },
-            {
-                "params": [model.layer_stacks.output.linear.weight],
-                "min_weight": -self.max_hidden_weight[2],
-                "max_weight": self.max_hidden_weight[2],
-            },
-        ]
+        return (
+            [
+                {
+                    "params": [model.layer_stacks.l1.linear.weight],
+                    "min_weight": -self.max_hidden_weight[0],
+                    "max_weight": self.max_hidden_weight[0],
+                    "virtual_params": model.layer_stacks.l1.factorized_linear.weight,
+                },
+                {
+                    "params": [model.layer_stacks.l2.linear.weight],
+                    "min_weight": -self.max_hidden_weight[1],
+                    "max_weight": self.max_hidden_weight[1],
+                },
+                {
+                    "params": [model.layer_stacks.output.linear.weight],
+                    "min_weight": -self.max_hidden_weight[2],
+                    "max_weight": self.max_hidden_weight[2],
+                },
+            ]
+            + [
+                {
+                    "params": [layer.linear.weight],
+                    "min_weight": -self.max_hidden_weight[1],
+                    "max_weight": self.max_hidden_weight[1],
+                }
+                for layer in model.layer_stacks.extra
+            ]
+            + [
+                {
+                    "params": [layer.linear.weight],
+                    "min_weight": -self.max_hidden_weight[0],
+                    "max_weight": self.max_hidden_weight[0],
+                }
+                for layer in model.layer_stacks.fresh
+            ]
+        )
 
     def quantize_feature_transformer_weights(
         self,
