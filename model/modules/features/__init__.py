@@ -12,6 +12,13 @@ from .k32q2 import K32Q2
 from .k32q4 import K32Q4
 from .pp_3wide import PP3Wide
 
+# Proxy experiments: override the export (and clipping) dtype of the piece-square features
+if _dt := __import__("os").environ.get("NNUE_PSQ_DTYPE"):
+    import torch as _torch
+
+    for _cls in (K32Q2, K32Q4, HalfKav2Hm):
+        _cls.EXPORT_WEIGHT_DTYPE = getattr(_torch, _dt)
+
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
     "K32Q2^": K32Q2,

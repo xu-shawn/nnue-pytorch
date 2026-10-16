@@ -1,3 +1,5 @@
+import os
+
 import torch
 from torch import nn
 
@@ -22,7 +24,9 @@ class NNUEModel(nn.Module):
         self.quantize_config = config.quantize_config
         self.quantization = QuantizationManager(config.quantize_config)
 
-        self.num_ls_buckets = 32
+        # Proxy experiments: 8 (piece count), 32 (x queens) or 128 (x king zone x queens) stacks
+        self.num_ls_buckets = int(os.environ.get("NNUE_STACKS", "32"))
+        assert self.num_ls_buckets in (8, 32, 128)
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
@@ -91,7 +95,12 @@ class NNUEModel(nn.Module):
 
     def calculate_buckets(self, piece_count: torch.Tensor, queen_bucket: torch.Tensor):
         pc_bucket = (piece_count - 1) // 4
-        return pc_bucket * 4 + queen_bucket
+        # The loader packs the king zone above the two queen bits
+        if self.num_ls_buckets == 8:
+            return pc_bucket
+        if self.num_ls_buckets == 32:
+            return pc_bucket * 4 + queen_bucket % 4
+        return pc_bucket * 16 + queen_bucket
 
     def forward(
         self,
