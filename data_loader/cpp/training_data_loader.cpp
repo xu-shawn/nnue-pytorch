@@ -656,6 +656,63 @@ struct PromoAtkSqExtractor: IFeatureExtractor {
     }
 };
 
+// Attackers of the square in front of every pawn (its stop square), like Promo_Atk but for
+// all pawns. Attacker kinds relative to the pawn: own pawn, knight, bishop, rook, queen,
+// king, then the same six for the enemy; two thermometer levels (>= 1, >= 2). Index:
+// ((pawn colour * 48 + pawn square - 8) * 12 + kind) * 2 + level, colour relative to the
+// perspective and the pawn square oriented like the threat features.
+struct StopAtk {
+    static constexpr std::string_view NAME = "Stop_Atk";
+
+    static constexpr int KINDS               = 12;
+    static constexpr int INPUTS              = 2 * 48 * KINDS * 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 16 * KINDS * 2;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos    = e.pos;
+        auto  ksq    = pos.kingSquare(color);
+        int   orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        int k = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            for (Square from : pos.piecesBB(Piece(PieceType::Pawn, c)))
+            {
+                Square   to    = Square(static_cast<int>(from) + (c == Color::White ? 8 : -8));
+                Bitboard own   = pos.attackers(to, c);
+                Bitboard enemy = pos.attackers(to, !c);
+                int      base  = ((static_cast<int>(c) ^ static_cast<int>(color)) * 48
+                            + ((static_cast<int>(from) ^ orient) - 8))
+                         * KINDS;
+
+                int counts[KINDS];
+                for (int t = 0; t < 6; ++t)
+                {
+                    counts[t]     = (own & pos.piecesBB(Piece(PieceType(t), c))).count();
+                    counts[6 + t] = (enemy & pos.piecesBB(Piece(PieceType(t), !c))).count();
+                }
+
+                for (int kind = 0; kind < KINDS; ++kind)
+                    for (int level = 0; level < std::min(counts[kind], 2); ++level)
+                        features[k++] = (base + kind) * 2 + level;
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct StopAtkExtractor: IFeatureExtractor {
+    int inputs() const override { return StopAtk::INPUTS; }
+    int max_active_features() const override { return StopAtk::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return StopAtk::fill_features_sparse(e, features, color);
+    }
+};
+
 // The perspective's own passed pawns: no enemy pawn ahead on the same or an adjacent file.
 // Index: pawn square (ranks 2 to 7).
 struct Passed48 {
@@ -770,6 +827,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PromoAtkExtractor>();
     if (name == "Promo_AtkSq")
         return std::make_unique<PromoAtkSqExtractor>();
+    if (name == "Stop_Atk")
+        return std::make_unique<StopAtkExtractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;
