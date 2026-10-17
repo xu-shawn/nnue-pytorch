@@ -1,3 +1,5 @@
+import os
+
 import torch
 from torch import nn
 
@@ -22,7 +24,15 @@ class NNUEModel(nn.Module):
         self.quantize_config = config.quantize_config
         self.quantization = QuantizationManager(config.quantize_config)
 
-        self.num_ls_buckets = 32
+        # Architecture experiments: options appended to NNUE_LS_VARIANT
+        #   bkpc8 / bkpc16  layer stacks by piece count only (8 or 16 stacks, no queen split)
+        #   psqt            a per-stack 768 -> 1 piece-square term added to the output
+        #   tk              counts of the 80 threat kinds through 80 -> L3 into l2
+        _, *self.ls_options = os.environ.get("NNUE_LS_VARIANT", "base").split("+")
+        self.bucket_mode = next(
+            (o for o in self.ls_options if o.startswith("bk")), None
+        )
+        self.num_ls_buckets = {None: 32, "bkpc8": 8, "bkpc16": 16}[self.bucket_mode]
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
@@ -39,6 +49,12 @@ class NNUEModel(nn.Module):
                 self.psq_offset = offset
                 self.psq_span = f.NUM_INPUTS
             offset += f.NUM_INPUTS
+
+        # Threat kind of every threat feature index (80 = not a threat feature)
+        if "tk" in self.ls_options:
+            self.register_buffer("threat_kinds", _threat_kind_table(), persistent=False)
+        else:
+            self.threat_kinds = None
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
@@ -100,6 +116,10 @@ class NNUEModel(nn.Module):
         )
 
     def calculate_buckets(self, piece_count: torch.Tensor, queen_bucket: torch.Tensor):
+        if self.bucket_mode == "bkpc8":
+            return (piece_count - 1) // 4
+        if self.bucket_mode == "bkpc16":
+            return (piece_count - 1) // 2
         pc_bucket = (piece_count - 1) // 4
         return pc_bucket * 4 + queen_bucket
 
@@ -125,12 +145,27 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
         psq = None
-        if self.layer_stacks.variant in (
-            "att32p",
-            "att32pu",
-        ) or self.layer_stacks.block in (
-            "g",
-            "add",
+        tk = None
+        if self.threat_kinds is not None:
+            idx = torch.where(us.view(-1, 1) > 0.5, white_indices, black_indices).long()
+            kinds = self.threat_kinds[idx.clamp(0, self.threat_kinds.shape[0] - 1)]
+            is_threat = (idx >= 0) & (idx < self.threat_kinds.shape[0])
+            kinds = torch.where(is_threat, kinds, torch.full_like(kinds, 80))
+            tk = torch.zeros(idx.shape[0], 81, device=idx.device, dtype=l0_.dtype)
+            tk.scatter_add_(1, kinds, torch.ones_like(kinds, dtype=l0_.dtype))
+            tk = tk[:, :80]
+        if (
+            self.layer_stacks.variant
+            in (
+                "att32p",
+                "att32pu",
+            )
+            or self.layer_stacks.block
+            in (
+                "g",
+                "add",
+            )
+            or "psqt" in self.ls_options
         ):
             idx = torch.where(us.view(-1, 1) > 0.5, white_indices, black_indices).long()
             rel = idx - self.psq_offset
@@ -140,7 +175,54 @@ class NNUEModel(nn.Module):
             psq.scatter_(1, cols, 1.0)
             psq = psq[:, :768]
         x = self.layer_stacks(
-            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights, psq
+            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights, psq, tk
         )
 
         return x
+
+
+def _threat_kind_table() -> torch.Tensor:
+    """Threat kind (attacker piece x target colour x target type, 80 kinds) of every
+    Full_Threats index, following the loader's FullThreats layout."""
+    targets = {"P": "NR", "N": "PNBRQ", "B": "PNBR", "R": "PNBR", "Q": "PNBRQ"}
+
+    def n_attacks(pt, white, sq):
+        f, r = sq % 8, sq // 8
+        if pt == "P":
+            if not 1 <= r <= 6:
+                return 0
+            return sum(1 for df in (-1, 1) if 0 <= f + df < 8)
+        if pt == "N":
+            jumps = (
+                (1, 2),
+                (2, 1),
+                (-1, 2),
+                (-2, 1),
+                (1, -2),
+                (2, -1),
+                (-1, -2),
+                (-2, -1),
+            )
+            return sum(1 for df, dr in jumps if 0 <= f + df < 8 and 0 <= r + dr < 8)
+        diag, line = (
+            [(1, 1), (1, -1), (-1, 1), (-1, -1)],
+            [(1, 0), (-1, 0), (0, 1), (0, -1)],
+        )
+        n = 0
+        for df, dr in {"B": diag, "R": line, "Q": diag + line}[pt]:
+            ff, rr = f + df, r + dr
+            while 0 <= ff < 8 and 0 <= rr < 8:
+                n += 1
+                ff, rr = ff + df, rr + dr
+        return n
+
+    table = []
+    kind = 0
+    for white in (True, False):
+        for pt in "PNBRQ":
+            per_target = sum(n_attacks(pt, white, s) for s in range(64))
+            for _ in range(2 * len(targets[pt])):
+                table += [kind] * per_target
+                kind += 1
+    assert len(table) == 59808 and kind == 80, (len(table), kind)
+    return torch.tensor(table, dtype=torch.long)

@@ -232,6 +232,32 @@ class NNUE(nn.Module):
                 "lr": LRs[8],
                 "weight_decay": dense_wd,
             },
+            # Architecture experiments: psqt output term (like FT weights, no decay) and
+            # threat-kind counts into l2 (like the piece-square layers)
+            {
+                "params": [
+                    p
+                    for layer in (self.model.layer_stacks.psqt,)
+                    if layer is not None
+                    for p in layer.parameters()
+                ],
+                "lr": LRs[0],
+                "weight_decay": 0.0,
+            },
+            {
+                "params": [self.model.layer_stacks.tk_layer.weight]
+                if self.model.layer_stacks.tk_layer is not None
+                else [],
+                "lr": LRs[4],
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.layer_stacks.tk_layer.bias]
+                if self.model.layer_stacks.tk_layer is not None
+                else [],
+                "lr": LRs[5],
+                "weight_decay": 0.0,
+            },
             # NNUE_LS_FACT: shared components of l2 and the output layer, like l1's
             {
                 "params": [

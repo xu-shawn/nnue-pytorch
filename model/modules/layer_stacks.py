@@ -64,7 +64,16 @@ class LayerStacks(nn.Module):
             if o.startswith("l1s"):
                 self.l1_scale = float(o[3:])
             else:
-                assert o == "fact", o
+                assert o in ("fact", "psqt", "tk", "bkpc8", "bkpc16"), o
+        # +psqt: per-stack linear piece-square term on the output (an int32 accumulator
+        # with one lane per stack in the engine); +tk: threat-kind counts into l2
+        self.psqt = nn.Linear(768, count) if "psqt" in options else None
+        self.tk_layer = nn.Linear(80, self.L3) if "tk" in options else None
+        with torch.no_grad():
+            for layer in (self.psqt, self.tk_layer):
+                if layer is not None:
+                    layer.weight.zero_()
+                    layer.bias.zero_()
         ls_cls = FactorizedStackedLinear if self.ls_fact else StackedLinear
         self.l2 = ls_cls(self.L2 * 2, block_out, count, quantization, "ls_l2")
 
@@ -343,8 +352,10 @@ class LayerStacks(nn.Module):
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
         psq: torch.Tensor | None = None,
+        tk: torch.Tensor | None = None,
     ):
         if self.variant != "base":
+            assert self.psqt is None and self.tk_layer is None
             return self._forward_variant(
                 x, ls_indices, fake_quantize_acts, fake_quantize_weights, psq
             )
@@ -368,6 +379,8 @@ class LayerStacks(nn.Module):
         l1x_ = self.quantization.clip_ls_act(l1x_)
 
         l2c_ = self.l2(l1x_, ls_indices, fake_quantize_weights)
+        if self.tk_layer is not None:
+            l2c_ = l2c_ + self.tk_layer(tk)
         l2x_ = l2c_
 
         l2_sqr = torch.pow(l2x_, 2.0)
@@ -390,6 +403,8 @@ class LayerStacks(nn.Module):
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
 
         l3x_ = l3c_ + l1x_out
+        if self.psqt is not None:
+            l3x_ = l3x_ + self.psqt(psq).gather(1, ls_indices.view(-1, 1).long())
         if fake_quantize_acts:
             l3x_ = self.quantization.fake_quantize_output(l3x_)
 
