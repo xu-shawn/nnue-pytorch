@@ -283,6 +283,10 @@ class NNUE(nn.Module):
 
     def on_validation_epoch_end(self):
         self.loss_metrics["val_loss_epoch"].reset()
+        # Depth experiments: residual-stream saturation measured during this validation
+        if self.model.layer_stacks.stream_stats:
+            print(f"Epoch {self.current_epoch} stream statistics:", flush=True)
+            self.model.layer_stacks.print_stream_stats()
 
     def on_test_epoch_start(self):
         self.optimizer_wrapper.on_test_epoch_start(self)

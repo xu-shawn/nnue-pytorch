@@ -94,11 +94,14 @@ class LayerStacks(nn.Module):
             )
             or re.fullmatch(r"deep\d+(c|s|g|glu|add)?", v) is not None
             or (v.startswith("res") and v[3:].isdigit())
+            or re.fullmatch(r"res\d+d", v) is not None
         ), v
         if v.startswith("deep"):
             extra = int(re.match(r"deep(\d+)", v).group(1))
         elif v == "res64":
             extra = 2
+        elif re.fullmatch(r"res\d+d", v):
+            extra = int(v[3:-1]) - 1
         elif v.startswith("res") and v[3:].isdigit():
             extra = int(v[3:]) - 1
         elif v in ("resc3", "ress3", "resg3", "resglu3", "resadd3"):
@@ -124,6 +127,14 @@ class LayerStacks(nn.Module):
         elif self.block == "add":
             n_psq, w_psq = 1 + extra, self.L3
         self.psq_fresh = nn.ModuleList(nn.Linear(768, w_psq) for _ in range(n_psq))
+        # resNd: a signed 64 -> 64 projection after each block's activation, so the
+        # residual update can be negative
+        self.proj = nn.ModuleList(
+            StackedLinear(self.L3 * 2, self.L3 * 2, count, quantization, "ls_l2")
+            for _ in range(1 + extra if re.fullmatch(r"res\d+d", v) else 0)
+        )
+        # Saturation statistics of the residual stream, recorded during validation
+        self.stream_stats = {}
         if self.block == "g":
             # Start with the gates open (crelu(1) = 127/128), so the gated layers begin
             # as plain ones and learn where to close
@@ -174,6 +185,25 @@ class LayerStacks(nn.Module):
             a = self.quantization.fake_quantize_ls_act(a)
         return a
 
+    @torch.no_grad()
+    def _record_stream(self, k, h, a, new) -> None:
+        """Per block: fraction of stream units at the clip, and of the update lost to it."""
+        top = self.quantization.max_hidden_activation
+        lost = (h + a - new).abs().sum() / a.abs().sum().clamp_min(1e-9)
+        st = self.stream_stats.setdefault(k, [0.0, 0.0, 0])
+        st[0] += (new >= top - 1e-6).float().mean().item()
+        st[1] += lost.item()
+        st[2] += 1
+
+    def print_stream_stats(self) -> None:
+        for k, (sat, lost, n) in sorted(self.stream_stats.items()):
+            print(
+                f"STREAM block {k}: {100 * sat / n:.1f}% of units at the clip, "
+                f"{100 * lost / n:.1f}% of the update lost to clipping ({n} batches)",
+                flush=True,
+            )
+        self.stream_stats.clear()
+
     def _sqr(self, x: torch.Tensor, fake_quantize_acts: bool) -> torch.Tensor:
         """sqr-clipped-relu alone, scaled like the first half of _act."""
         sqr = torch.pow(x, 2.0)
@@ -213,10 +243,16 @@ class LayerStacks(nn.Module):
         elif v == "rec64" or v.startswith("res"):
             h = self._act(l1c_, fq_a)
             blocks = [self.l2] * 3 if v == "rec64" else [self.l2, *self.extra]
-            for layer in blocks:
-                h = self.quantization.clip_ls_act(
-                    h + self._act(layer(h, ls_indices, fq_w), fq_a)
-                )
+            for k, layer in enumerate(blocks):
+                a = self._act(layer(h, ls_indices, fq_w), fq_a)
+                if self.proj:
+                    a = self.proj[k](a, ls_indices, fq_w)
+                    if fq_a:
+                        a = self.quantization.fake_quantize_ls_act(a)
+                new = self.quantization.clip_ls_act(h + a)
+                if not self.training:
+                    self._record_stream(k, h, a, new)
+                h = new
         else:  # att32
             s = self._crelu(l1c_, fq_a)
             if v == "att32":
