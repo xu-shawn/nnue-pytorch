@@ -191,21 +191,30 @@ class LayerStacks(nn.Module):
             a = self.quantization.fake_quantize_ls_act(a)
         return a
 
+    @torch.compiler.disable
     @torch.no_grad()
     def _record_stream(self, k, h, a, new) -> None:
-        """Per block: fraction of stream units at the clip, and of the update lost to it."""
+        """Per block: fraction of stream units at the clip, and of the update lost to it.
+
+        Kept as device tensors (no host sync) and outside torch.compile, so that
+        validation is not slowed down or recompiled.
+        """
         top = self.quantization.max_hidden_activation
+        sat = (new >= top - 1e-6).float().mean()
         lost = (h + a - new).abs().sum() / a.abs().sum().clamp_min(1e-9)
-        st = self.stream_stats.setdefault(k, [0.0, 0.0, 0])
-        st[0] += (new >= top - 1e-6).float().mean().item()
-        st[1] += lost.item()
-        st[2] += 1
+        st = self.stream_stats.get(k)
+        if st is None:
+            self.stream_stats[k] = [sat, lost, 1]
+        else:
+            st[0] = st[0] + sat
+            st[1] = st[1] + lost
+            st[2] += 1
 
     def print_stream_stats(self) -> None:
         for k, (sat, lost, n) in sorted(self.stream_stats.items()):
             print(
-                f"STREAM block {k}: {100 * sat / n:.1f}% of units at the clip, "
-                f"{100 * lost / n:.1f}% of the update lost to clipping ({n} batches)",
+                f"STREAM block {k}: {100 * sat.item() / n:.1f}% of units at the clip, "
+                f"{100 * lost.item() / n:.1f}% of the update lost to clipping ({n} batches)",
                 flush=True,
             )
         self.stream_stats.clear()
