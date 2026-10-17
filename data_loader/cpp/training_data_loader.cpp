@@ -656,15 +656,17 @@ struct PromoAtkSqExtractor: IFeatureExtractor {
     }
 };
 
-// Attackers of the square in front of every pawn (its stop square), like Promo_Atk but for
-// all pawns. Attacker kinds relative to the pawn: own pawn, knight, bishop, rook, queen,
-// king, then the same six for the enemy; two thermometer levels (>= 1, >= 2). Index:
-// ((pawn colour * 48 + pawn square - 8) * 12 + kind) * 2 + level, colour relative to the
-// perspective and the pawn square oriented like the threat features.
+// Attackers of the empty square in front of every pawn (its stop square), like Promo_Atk
+// but for all pawns. Attacker kinds relative to the pawn: own knight, bishop, rook, queen,
+// king, then the same five for the enemy; two thermometer levels (>= 1, >= 2). Pawn
+// attackers are left out because PP_3Wide already has every pawn pair on adjacent files,
+// and occupied stop squares because the threat features already cover attacks on the
+// blocker. Index: ((pawn colour * 48 + pawn square - 8) * 10 + kind) * 2 + level, colour
+// relative to the perspective and the pawn square oriented like the threat features.
 struct StopAtk {
     static constexpr std::string_view NAME = "Stop_Atk";
 
-    static constexpr int KINDS               = 12;
+    static constexpr int KINDS               = 10;
     static constexpr int INPUTS              = 2 * 48 * KINDS * 2;
     static constexpr int MAX_ACTIVE_FEATURES = 16 * KINDS * 2;
 
@@ -674,13 +676,17 @@ struct StopAtk {
         auto  ksq    = pos.kingSquare(color);
         int   orient = static_cast<int>(
           FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
-        int k = 0;
+        Bitboard occupied = pos.piecesBB();
+        int      k        = 0;
 
         for (Color c : {Color::White, Color::Black})
         {
             for (Square from : pos.piecesBB(Piece(PieceType::Pawn, c)))
             {
-                Square   to    = Square(static_cast<int>(from) + (c == Color::White ? 8 : -8));
+                Square to = Square(static_cast<int>(from) + (c == Color::White ? 8 : -8));
+                if (occupied.isSet(to))
+                    continue;
+
                 Bitboard own   = pos.attackers(to, c);
                 Bitboard enemy = pos.attackers(to, !c);
                 int      base  = ((static_cast<int>(c) ^ static_cast<int>(color)) * 48
@@ -688,10 +694,10 @@ struct StopAtk {
                          * KINDS;
 
                 int counts[KINDS];
-                for (int t = 0; t < 6; ++t)
+                for (int t = 0; t < 5; ++t)
                 {
-                    counts[t]     = (own & pos.piecesBB(Piece(PieceType(t), c))).count();
-                    counts[6 + t] = (enemy & pos.piecesBB(Piece(PieceType(t), !c))).count();
+                    counts[t]     = (own & pos.piecesBB(Piece(PieceType(t + 1), c))).count();
+                    counts[5 + t] = (enemy & pos.piecesBB(Piece(PieceType(t + 1), !c))).count();
                 }
 
                 for (int kind = 0; kind < KINDS; ++kind)
@@ -710,6 +716,99 @@ struct StopAtkExtractor: IFeatureExtractor {
     std::pair<int, int>
     fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
         return StopAtk::fill_features_sparse(e, features, color);
+    }
+};
+
+// Threat features for the empty square in front of every pawn (its stop square): every
+// knight, bishop, rook, queen or king attacking it is a feature of its own, indexed by
+// attacker square, which extends the threat features (occupied squares only, no king
+// attackers) to these squares. Pawn attackers and occupied stop squares are left out as in
+// Stop_Atk. Index: pawn colour relative to the perspective, oriented pawn square (a2 to
+// h7), attacker kind (own knight, bishop, rook, queen, king, then the enemy's, relative to
+// the pawn) and attacker square, counting only the squares from which that kind can reach
+// the stop square.
+struct StopThreats {
+    static constexpr std::string_view NAME = "Stop_Threats";
+
+    static constexpr int KINDS = 10;
+    // A square has at most 18 non-pawn attackers (8 knights, a slider on each of its 8
+    // rays and 2 kings) and there are at most 16 pawns; real positions use about 10.
+    static constexpr int MAX_ACTIVE_FEATURES = 16 * 18;
+
+    struct Table {
+        std::uint64_t reach[2][48][KINDS];
+        int           offset[2][48][KINDS];
+        int           total;
+    };
+
+    // Indexed by pawn colour relative to the perspective (0: the perspective's pawns, which
+    // advance towards the oriented 8th rank), oriented pawn square - 8 and kind.
+    static constexpr Table table = []() {
+        Table          t{};
+        constexpr auto pseudo = bb::detail::generatePseudoAttacks();
+        int            offset = 0;
+        for (int c = 0; c < 2; ++c)
+            for (int s = 0; s < 48; ++s)
+                for (int k = 0; k < KINDS; ++k)
+                {
+                    Square        to    = Square(s + 8 + (c == 0 ? 8 : -8));
+                    std::uint64_t reach = pseudo[PieceType(k % 5 + 1)][to].bits();
+                    t.reach[c][s][k]    = reach;
+                    t.offset[c][s][k]   = offset;
+                    offset += Bitboard::fromBits(reach).count();
+                }
+        t.total = offset;
+        return t;
+    }();
+
+    static constexpr int INPUTS = table.total;
+    static_assert(INPUTS == 11256);
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        Bitboard occupied = pos.piecesBB();
+        Bitboard pawns    = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+        int      k        = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            int rel = static_cast<int>(c) ^ static_cast<int>(color);
+
+            for (Square from : pos.piecesBB(Piece(PieceType::Pawn, c)))
+            {
+                Square to = Square(static_cast<int>(from) + (c == Color::White ? 8 : -8));
+                if (occupied.isSet(to))
+                    continue;
+
+                int s = (static_cast<int>(from) ^ orient) - 8;
+                for (Color side : {c, !c})
+                    for (Square a : pos.attackers(to, side) & ~pawns)
+                    {
+                        int kind = static_cast<int>(pos.pieceAt(a).type()) - 1 + (side == c ? 0 : 5);
+                        int a_o  = static_cast<int>(a) ^ orient;
+                        assert(table.reach[rel][s][kind] >> a_o & 1);
+                        features[k++] =
+                          table.offset[rel][s][kind]
+                          + Bitboard::fromBits(table.reach[rel][s][kind] & ((1ULL << a_o) - 1))
+                              .count();
+                    }
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct StopThreatsExtractor: IFeatureExtractor {
+    int inputs() const override { return StopThreats::INPUTS; }
+    int max_active_features() const override { return StopThreats::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return StopThreats::fill_features_sparse(e, features, color);
     }
 };
 
@@ -829,6 +928,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PromoAtkSqExtractor>();
     if (name == "Stop_Atk")
         return std::make_unique<StopAtkExtractor>();
+    if (name == "Stop_Threats")
+        return std::make_unique<StopThreatsExtractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;

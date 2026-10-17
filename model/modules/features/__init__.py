@@ -15,6 +15,7 @@ from .pp_3wide import PP3Wide
 from .promo_atk import PromoAtk
 from .promo_atk_sq import PromoAtkSq
 from .stop_atk import StopAtk
+from .stop_threats import StopThreats
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
@@ -25,6 +26,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "Promo_Atk": PromoAtk,
     "Promo_AtkSq": PromoAtkSq,
     "Stop_Atk": StopAtk,
+    "Stop_Threats": StopThreats,
     "Passed_48": Passed48,
 }
 
