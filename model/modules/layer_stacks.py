@@ -1,4 +1,5 @@
 import os
+import re
 from collections.abc import Generator
 
 import torch
@@ -29,17 +30,32 @@ class LayerStacks(nn.Module):
             2 * self.L1 // 2, self.L2, count, quantization, "ls_l1"
         )
         variant = os.environ.get("NNUE_LS_VARIANT", "base")
-        block_out = {
-            "resc3": 2 * self.L3,
-            "ress3": 2 * self.L3,
-            "resglu3": 4 * self.L3,
-        }.get(variant, self.L3)
+        # Block kind of the hidden layers after l1: c (64 -> 64 crelu), s (64 -> 64
+        # sqr-crelu), g (psq gate), glu (self-gated), add (psq added); None for the
+        # plain sqr|crelu layers. Used by the resN<x> and deepN<x> variants.
+        m = re.fullmatch(r"deep\d+(c|s|g|glu|add)", variant)
+        self.block = (
+            m.group(1)
+            if m
+            else {
+                "resc3": "c",
+                "ress3": "s",
+                "resg3": "g",
+                "resglu3": "glu",
+                "resadd3": "add",
+            }.get(variant)
+        )
+        block_out = {"c": 2 * self.L3, "s": 2 * self.L3, "glu": 4 * self.L3}.get(
+            self.block, self.L3
+        )
         self.l2 = StackedLinear(self.L2 * 2, block_out, count, quantization, "ls_l2")
 
         # Depth experiments (proxy runs only; the serializer knows only "base"):
         #   base    the current layers, output sees both hidden layers plus a skip path
         #   noskip  output sees only the second hidden layer, no skip path (nettest #511)
         #   deepN   noskip plus N more 64 -> 32 hidden layers in a chain
+        #   deepNx  deepN with every hidden layer after l1 of block kind x (c, s, g, glu,
+        #           add; see the res variants below for what each block does)
         #   res64   64-wide stream: s = clip(s + act(W s)), act = sqr|crelu concat (64),
         #           3 blocks with their own weights (l2 is the first)
         #   resN    as res64 with N blocks
@@ -76,11 +92,11 @@ class LayerStacks(nn.Module):
                 "resglu3",
                 "resadd3",
             )
-            or (v.startswith("deep") and v[4:].isdigit())
+            or re.fullmatch(r"deep\d+(c|s|g|glu|add)?", v) is not None
             or (v.startswith("res") and v[3:].isdigit())
         ), v
         if v.startswith("deep"):
-            extra = int(v[4:])
+            extra = int(re.match(r"deep(\d+)", v).group(1))
         elif v == "res64":
             extra = 2
         elif v.startswith("res") and v[3:].isdigit():
@@ -102,12 +118,18 @@ class LayerStacks(nn.Module):
             )
             for _ in range(2 if v in ("att32", "att32pu") else 0)
         )
-        n_psq, w_psq = {
-            "att32p": (2, self.L3),
-            "resg3": (3, 2 * self.L3),
-            "resadd3": (3, self.L3),
-        }.get(v, (0, 0))
+        n_psq, w_psq = (2, self.L3) if v == "att32p" else (0, 0)
+        if self.block == "g":
+            n_psq, w_psq = 1 + extra, 2 * self.L3
+        elif self.block == "add":
+            n_psq, w_psq = 1 + extra, self.L3
         self.psq_fresh = nn.ModuleList(nn.Linear(768, w_psq) for _ in range(n_psq))
+        if self.block == "g":
+            # Start with the gates open (crelu(1) = 127/128), so the gated layers begin
+            # as plain ones and learn where to close
+            with torch.no_grad():
+                for gate in self.psq_fresh:
+                    gate.bias.fill_(1.0)
 
         self.output = StackedLinear(
             self.L2 * 2 + self.L3 * 2 if v == "base" else self.L3 * 2,
@@ -130,6 +152,28 @@ class LayerStacks(nn.Module):
             x = self.quantization.fake_quantize_ls_act(x)
         return self.quantization.clip_ls_act(torch.cat([sqr, x], dim=1))
 
+    def _block(self, layer, k, h, ls_indices, psq, fq_a, fq_w) -> torch.Tensor:
+        """Hidden layer k of kind self.block applied to the 64-wide activations h."""
+        b = self.block
+        if b == "add":
+            return self._act(layer(h, ls_indices, fq_w) + self.psq_fresh[k](psq), fq_a)
+        t = layer(h, ls_indices, fq_w)
+        if b == "c":
+            return self._crelu(t, fq_a)
+        if b == "s":
+            return self._sqr(t, fq_a)
+        if b == "glu":
+            # Products of two values in [0, 1) mostly fall below one activation step
+            # (1/128) and the chain dies; scale by 4 (a 2-bit smaller shift in int8)
+            half = t.shape[1] // 2
+            a = self._crelu(t[:, :half], fq_a) * self._crelu(t[:, half:], fq_a)
+            a = self.quantization.clip_ls_act(4 * a)
+        else:  # g
+            a = self._act(t, fq_a) * self._crelu(self.psq_fresh[k](psq), fq_a)
+        if fq_a:
+            a = self.quantization.fake_quantize_ls_act(a)
+        return a
+
     def _sqr(self, x: torch.Tensor, fake_quantize_acts: bool) -> torch.Tensor:
         """sqr-clipped-relu alone, scaled like the first half of _act."""
         sqr = torch.pow(x, 2.0)
@@ -151,7 +195,11 @@ class LayerStacks(nn.Module):
         l1c_ = self.l1(x, ls_indices, fq_w)
         v = self.variant
 
-        if v == "noskip" or v.startswith("deep"):
+        if v.startswith("deep") and self.block is not None:
+            h = self._act(l1c_, fq_a)
+            for k, layer in enumerate([self.l2, *self.extra]):
+                h = self._block(layer, k, h, ls_indices, psq, fq_a, fq_w)
+        elif v == "noskip" or v.startswith("deep"):
             h = self._act(self.l2(self._act(l1c_, fq_a), ls_indices, fq_w), fq_a)
             for layer in self.extra:
                 h = self._act(layer(h, ls_indices, fq_w), fq_a)
@@ -159,28 +207,9 @@ class LayerStacks(nn.Module):
             h = self._act(l1c_, fq_a)
             blocks = [self.l2, *self.extra]
             for k, layer in enumerate(blocks):
-                if v == "resadd3":
-                    a = self._act(
-                        layer(h, ls_indices, fq_w) + self.psq_fresh[k](psq), fq_a
-                    )
-                else:
-                    t = layer(h, ls_indices, fq_w)
-                    if v == "resc3":
-                        a = self._crelu(t, fq_a)
-                    elif v == "ress3":
-                        a = self._sqr(t, fq_a)
-                    elif v == "resglu3":
-                        half = t.shape[1] // 2
-                        a = self._crelu(t[:, :half], fq_a) * self._crelu(
-                            t[:, half:], fq_a
-                        )
-                    else:  # resg3
-                        a = self._act(t, fq_a) * self._crelu(
-                            self.psq_fresh[k](psq), fq_a
-                        )
-                    if v in ("resglu3", "resg3") and fq_a:
-                        a = self.quantization.fake_quantize_ls_act(a)
-                h = self.quantization.clip_ls_act(h + a)
+                h = self.quantization.clip_ls_act(
+                    h + self._block(layer, k, h, ls_indices, psq, fq_a, fq_w)
+                )
         elif v == "rec64" or v.startswith("res"):
             h = self._act(l1c_, fq_a)
             blocks = [self.l2] * 3 if v == "rec64" else [self.l2, *self.extra]

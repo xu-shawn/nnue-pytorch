@@ -125,7 +125,13 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
         psq = None
-        if self.layer_stacks.variant in ("att32p", "att32pu", "resg3", "resadd3"):
+        if self.layer_stacks.variant in (
+            "att32p",
+            "att32pu",
+        ) or self.layer_stacks.block in (
+            "g",
+            "add",
+        ):
             idx = torch.where(us.view(-1, 1) > 0.5, white_indices, black_indices).long()
             rel = idx - self.psq_offset
             valid = (idx >= 0) & (rel >= 0) & (rel < self.psq_span)
