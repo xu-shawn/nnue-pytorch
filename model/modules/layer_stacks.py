@@ -313,7 +313,7 @@ class LayerStacks(nn.Module):
         self, x, ls_indices, fake_quantize_acts, fake_quantize_weights, psq=None
     ):
         fq_a, fq_w = fake_quantize_acts, fake_quantize_weights
-        l1c_ = self.l1(x, ls_indices, fq_w)
+        l1c_ = self._inject_l1(self.l1(x, ls_indices, fq_w), psq)
         v = self.variant
 
         if self.dense:
@@ -329,7 +329,7 @@ class LayerStacks(nn.Module):
             out = self.output(torch.cat(hs, dim=1), ls_indices, fq_w)
             if fq_a:
                 skip = self.quantization.fake_quantize_skip_act(skip)
-            out = out + skip
+            out = self._scale_output(out + skip, psq)
             if fq_a:
                 out = self.quantization.fake_quantize_output(out)
             return out
@@ -379,10 +379,31 @@ class LayerStacks(nn.Module):
                 s = self.quantization.clip_ls_act(s + prod)
             h = self._act(s, fq_a)
 
-        out = self.output(h, ls_indices, fq_w)
+        out = self._scale_output(self.output(h, ls_indices, fq_w), psq)
         if fq_a:
             out = self.quantization.fake_quantize_output(out)
         return out
+
+    def _inject_l1(self, l1c_: torch.Tensor, psq: torch.Tensor | None) -> torch.Tensor:
+        """+pn / +mat: pawn-structure MLP and material one-hots into the l1 outputs."""
+        if self.pawn_net is not None:
+            pawns = psq[:, :128]
+            if self.pawn_kings:
+                pawns = torch.cat([pawns, psq[:, 640:768]], dim=1)
+            l1c_ = l1c_ + self.pawn_net(pawns)
+        if self.mat_layer is not None:
+            l1c_ = l1c_ + self.mat_layer(material_features(psq))
+        return l1c_
+
+    def _scale_output(
+        self, out: torch.Tensor, psq: torch.Tensor | None
+    ) -> torch.Tensor:
+        """+scale: multiplicative drawishness factor on the output."""
+        if self.scale_layer is None:
+            return out
+        files = psq[:, :128].view(-1, 2, 8, 8).amax(dim=2).flatten(1)  # pawns per file
+        s = self.scale_layer(torch.cat([material_features(psq), files], dim=1))
+        return out * (2 * torch.sigmoid(s))
 
     def forward(
         self,
@@ -399,14 +420,7 @@ class LayerStacks(nn.Module):
                 x, ls_indices, fake_quantize_acts, fake_quantize_weights, psq
             )
 
-        l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
-        if self.pawn_net is not None:
-            pawns = psq[:, :128]
-            if self.pawn_kings:
-                pawns = torch.cat([pawns, psq[:, 640:768]], dim=1)
-            l1c_ = l1c_ + self.pawn_net(pawns)
-        if self.mat_layer is not None:
-            l1c_ = l1c_ + self.mat_layer(material_features(psq))
+        l1c_ = self._inject_l1(self.l1(x, ls_indices, fake_quantize_weights), psq)
 
         # Extract the short-path skip connection before fake quantization
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
@@ -448,13 +462,7 @@ class LayerStacks(nn.Module):
         if fake_quantize_acts:
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
 
-        l3x_ = l3c_ + l1x_out
-        if self.scale_layer is not None:
-            files = (
-                psq[:, :128].view(-1, 2, 8, 8).amax(dim=2).flatten(1)
-            )  # pawns per file
-            s = self.scale_layer(torch.cat([material_features(psq), files], dim=1))
-            l3x_ = l3x_ * (2 * torch.sigmoid(s))
+        l3x_ = self._scale_output(l3c_ + l1x_out, psq)
         if self.psqt is not None:
             l3x_ = l3x_ + self.psqt(psq).gather(1, ls_indices.view(-1, 1).long())
         if fake_quantize_acts:
