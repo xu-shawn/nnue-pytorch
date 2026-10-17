@@ -71,6 +71,7 @@ class LayerStacks(nn.Module):
                     "bkpc8",
                     "bkpc16",
                     "mat",
+                    "scale",
                 ) or re.fullmatch(r"pnk?\d+(x2)?", o), o
         # +psqt: per-stack linear piece-square term on the output (an int32 accumulator
         # with one lane per stack in the engine); +tk: threat-kind counts into l2
@@ -93,6 +94,13 @@ class LayerStacks(nn.Module):
             with torch.no_grad():
                 self.pawn_net[-1].weight.zero_()
                 self.pawn_net[-1].bias.zero_()
+        # +scale: multiplicative drawishness factor on the output, from the material
+        # features and the pawn files of both sides (cacheable by material + pawn key)
+        self.scale_layer = nn.Linear(MAT_DIMS + 16, 1) if "scale" in options else None
+        if self.scale_layer is not None:
+            with torch.no_grad():
+                self.scale_layer.weight.zero_()
+                self.scale_layer.bias.zero_()
         # +mat: material imbalance one-hots into the l1 outputs
         self.mat_layer = nn.Linear(MAT_DIMS, self.L2) if "mat" in options else None
         if self.mat_layer is not None:
@@ -440,6 +448,12 @@ class LayerStacks(nn.Module):
             l1x_out = self.quantization.fake_quantize_skip_act(l1x_out)
 
         l3x_ = l3c_ + l1x_out
+        if self.scale_layer is not None:
+            files = (
+                psq[:, :128].view(-1, 2, 8, 8).amax(dim=2).flatten(1)
+            )  # pawns per file
+            s = self.scale_layer(torch.cat([material_features(psq), files], dim=1))
+            l3x_ = l3x_ * (2 * torch.sigmoid(s))
         if self.psqt is not None:
             l3x_ = l3x_ + self.psqt(psq).gather(1, ls_indices.view(-1, 1).long())
         if fake_quantize_acts:

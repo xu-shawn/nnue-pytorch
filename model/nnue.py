@@ -250,6 +250,7 @@ class NNUE(nn.Module):
                     for layer in (
                         self.model.layer_stacks.pawn_net,
                         self.model.layer_stacks.mat_layer,
+                        self.model.layer_stacks.scale_layer,
                     )
                     if layer is not None
                     for n_, p in layer.named_parameters()
@@ -264,6 +265,7 @@ class NNUE(nn.Module):
                     for layer in (
                         self.model.layer_stacks.pawn_net,
                         self.model.layer_stacks.mat_layer,
+                        self.model.layer_stacks.scale_layer,
                     )
                     if layer is not None
                     for n_, p in layer.named_parameters()
