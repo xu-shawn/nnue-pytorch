@@ -33,7 +33,7 @@ class LayerStacks(nn.Module):
         # Block kind of the hidden layers after l1: c (64 -> 64 crelu), s (64 -> 64
         # sqr-crelu), g (psq gate), glu (self-gated), add (psq added); None for the
         # plain sqr|crelu layers. Used by the resN<x> and deepN<x> variants.
-        m = re.fullmatch(r"deep\d+(c|s|g|glu|add)", variant)
+        m = re.fullmatch(r"deep\d+(c|s|g|glu|add)i?", variant)
         self.block = (
             m.group(1)
             if m
@@ -54,6 +54,8 @@ class LayerStacks(nn.Module):
         #   base    the current layers, output sees both hidden layers plus a skip path
         #   noskip  output sees only the second hidden layer, no skip path (nettest #511)
         #   deepN   noskip plus N more 64 -> 32 hidden layers in a chain
+        #   deepN..i  with the hidden layers after l1 starting at bias 0.25, so that their
+        #           activations are not all rounded to zero at initialisation
         #   deepNx  deepN with every hidden layer after l1 of block kind x (c, s, g, glu,
         #           add; see the res variants below for what each block does)
         #   res64   64-wide stream: s = clip(s + act(W s)), act = sqr|crelu concat (64),
@@ -92,7 +94,7 @@ class LayerStacks(nn.Module):
                 "resglu3",
                 "resadd3",
             )
-            or re.fullmatch(r"deep\d+(c|s|g|glu|add)?", v) is not None
+            or re.fullmatch(r"deep\d+(c|s|g|glu|add)?i?", v) is not None
             or (v.startswith("res") and v[3:].isdigit())
             or re.fullmatch(r"res\d+d", v) is not None
         ), v
@@ -133,6 +135,10 @@ class LayerStacks(nn.Module):
             StackedLinear(self.L3 * 2, self.L3 * 2, count, quantization, "ls_l2")
             for _ in range(1 + extra if re.fullmatch(r"res\d+d", v) else 0)
         )
+        if re.fullmatch(r"deep\d+(c|s|g|glu|add)?i", v):
+            with torch.no_grad():
+                for layer in [self.l2, *self.extra]:
+                    layer.linear.bias.fill_(0.25)
         # Saturation statistics of the residual stream, recorded during validation
         self.stream_stats = {}
         if self.block == "g":
