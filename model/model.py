@@ -28,6 +28,11 @@ class NNUEModel(nn.Module):
         #   bkpc8 / bkpc16  layer stacks by piece count only (8 or 16 stacks, no queen split)
         #   psqt            a per-stack 768 -> 1 piece-square term added to the output
         #   tk              counts of the 80 threat kinds through 80 -> L3 into l2
+        #   pn<P> / pnk<P>  pawn-structure MLP (side to move's oriented pawn planes, pnk also
+        #                   both king squares) 128 -> P -> 32 added to the l1 outputs;
+        #                   cacheable by pawn key in the engine. pn<P>x2: two hidden layers
+        #   mat             material signature + count/difference one-hots -> 32 added to
+        #                   the l1 outputs (changes only on captures and promotions)
         _, *self.ls_options = os.environ.get("NNUE_LS_VARIANT", "base").split("+")
         self.bucket_mode = next(
             (o for o in self.ls_options if o.startswith("bk")), None
@@ -166,6 +171,8 @@ class NNUEModel(nn.Module):
                 "add",
             )
             or "psqt" in self.ls_options
+            or "mat" in self.ls_options
+            or any(o.startswith("pn") for o in self.ls_options)
         ):
             idx = torch.where(us.view(-1, 1) > 0.5, white_indices, black_indices).long()
             rel = idx - self.psq_offset

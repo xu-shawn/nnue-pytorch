@@ -245,6 +245,34 @@ class NNUE(nn.Module):
                 "weight_decay": 0.0,
             },
             {
+                "params": [
+                    p
+                    for layer in (
+                        self.model.layer_stacks.pawn_net,
+                        self.model.layer_stacks.mat_layer,
+                    )
+                    if layer is not None
+                    for n_, p in layer.named_parameters()
+                    if n_.endswith("weight")
+                ],
+                "lr": LRs[4],
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [
+                    p
+                    for layer in (
+                        self.model.layer_stacks.pawn_net,
+                        self.model.layer_stacks.mat_layer,
+                    )
+                    if layer is not None
+                    for n_, p in layer.named_parameters()
+                    if n_.endswith("bias")
+                ],
+                "lr": LRs[5],
+                "weight_decay": 0.0,
+            },
+            {
                 "params": [self.model.layer_stacks.tk_layer.weight]
                 if self.model.layer_stacks.tk_layer is not None
                 else [],

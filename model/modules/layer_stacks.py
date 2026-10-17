@@ -64,11 +64,41 @@ class LayerStacks(nn.Module):
             if o.startswith("l1s"):
                 self.l1_scale = float(o[3:])
             else:
-                assert o in ("fact", "psqt", "tk", "bkpc8", "bkpc16"), o
+                assert o in (
+                    "fact",
+                    "psqt",
+                    "tk",
+                    "bkpc8",
+                    "bkpc16",
+                    "mat",
+                ) or re.fullmatch(r"pnk?\d+(x2)?", o), o
         # +psqt: per-stack linear piece-square term on the output (an int32 accumulator
         # with one lane per stack in the engine); +tk: threat-kind counts into l2
         self.psqt = nn.Linear(768, count) if "psqt" in options else None
         self.tk_layer = nn.Linear(80, self.L3) if "tk" in options else None
+        # +pn<P>[x2] / +pnk<P>[x2]: pawn-structure MLP into the l1 outputs
+        self.pawn_net = None
+        pn = next((o for o in options if o.startswith("pn")), None)
+        if pn is not None:
+            m_pn = re.fullmatch(r"pn(k?)(\d+)(x2)?", pn)
+            self.pawn_kings = m_pn.group(1) == "k"
+            width = int(m_pn.group(2))
+            n_in = 256 if self.pawn_kings else 128
+            layers = [nn.Linear(n_in, width), _Clip()]
+            if m_pn.group(3):
+                layers += [nn.Linear(width, 64), _Clip()]
+                width = 64
+            layers.append(nn.Linear(width, self.L2))
+            self.pawn_net = nn.Sequential(*layers)
+            with torch.no_grad():
+                self.pawn_net[-1].weight.zero_()
+                self.pawn_net[-1].bias.zero_()
+        # +mat: material imbalance one-hots into the l1 outputs
+        self.mat_layer = nn.Linear(MAT_DIMS, self.L2) if "mat" in options else None
+        if self.mat_layer is not None:
+            with torch.no_grad():
+                self.mat_layer.weight.zero_()
+                self.mat_layer.bias.zero_()
         with torch.no_grad():
             for layer in (self.psqt, self.tk_layer):
                 if layer is not None:
@@ -361,6 +391,13 @@ class LayerStacks(nn.Module):
             )
 
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
+        if self.pawn_net is not None:
+            pawns = psq[:, :128]
+            if self.pawn_kings:
+                pawns = torch.cat([pawns, psq[:, 640:768]], dim=1)
+            l1c_ = l1c_ + self.pawn_net(pawns)
+        if self.mat_layer is not None:
+            l1c_ = l1c_ + self.mat_layer(material_features(psq))
 
         # Extract the short-path skip connection before fake quantization
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
@@ -430,3 +467,57 @@ class LayerStacks(nn.Module):
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(self) -> None:
         self.l1.coalesce_weights()
+
+
+class _Clip(nn.Module):
+    """Clipped ReLU to [0, 1] for the pawn-structure MLP."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x.clamp(0.0, 1.0)
+
+
+# Material features from the side to move's 768 piece-square planes (12 planes of 64,
+# plane = piece type * 2 + (piece is the opponent's)): per-side count one-hots (P 0-8,
+# N/B/R 0-2+, Q 0-1+), differences (minors -3..3, rooks -2..2, queens -1..1, pawns
+# -4..4), bishop pairs, and the joint non-pawn signature (Q 0-1, R 0-2, B 0-2, N 0-2 per
+# side: 54 x 54).
+_CAPS = [8, 2, 2, 2, 1]  # P, N, B, R, Q
+MAT_DIMS = 2 * sum(c + 1 for c in _CAPS) + 7 + 5 + 3 + 9 + 2 + 54 * 54
+
+
+def material_features(psq: torch.Tensor) -> torch.Tensor:
+    b = psq.shape[0]
+    planes = psq.view(b, 12, 64)
+    cnt = planes.sum(2).long()  # [B, 12]
+    own, opp = cnt[:, 0:10:2], cnt[:, 1:10:2]  # P N B R Q
+    parts = []
+    for side in (own, opp):
+        for t, cap in enumerate(_CAPS):
+            parts.append(nn.functional.one_hot(side[:, t].clamp(max=cap), cap + 1))
+    minors = (own[:, 1] + own[:, 2]) - (opp[:, 1] + opp[:, 2])
+    for d, lim in (
+        (minors, 3),
+        (own[:, 3] - opp[:, 3], 2),
+        (own[:, 4] - opp[:, 4], 1),
+        (own[:, 0] - opp[:, 0], 4),
+    ):
+        parts.append(nn.functional.one_hot(d.clamp(-lim, lim) + lim, 2 * lim + 1))
+    sq = torch.arange(64, device=psq.device)
+    colour = ((sq % 8) + (sq // 8)) % 2
+    for p in (4, 5):  # own, opponent bishops
+        light = (planes[:, p] * colour).sum(1)
+        dark = (planes[:, p] * (1 - colour)).sum(1)
+        parts.append(((light > 0) & (dark > 0)).long().view(-1, 1))
+
+    def sig(side):
+        return (
+            side[:, 4].clamp(max=1) * 27
+            + side[:, 3].clamp(max=2) * 9
+            + side[:, 2].clamp(max=2) * 3
+            + side[:, 1].clamp(max=2)
+        )
+
+    parts.append(nn.functional.one_hot(sig(own) * 54 + sig(opp), 54 * 54))
+    out = torch.cat(parts, dim=1).to(psq.dtype)
+    assert out.shape[1] == MAT_DIMS, out.shape
+    return out
