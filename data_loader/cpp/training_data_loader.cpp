@@ -812,6 +812,117 @@ struct StopThreatsExtractor: IFeatureExtractor {
     }
 };
 
+// Threat features for the empty squares attacked by pawns: for each color, every empty
+// square its pawns attack is a target, and every knight, bishop, rook, queen or king
+// attacking it is a feature of its own, indexed by attacker square (kinds as in
+// Stop_Threats, relative to the pawns' color). Two pawn kinds add what PP_3Wide misses:
+// the target is attacked by two of the color's pawns (pawns two files apart, e.g. c4 and
+// e4 on d5), and each enemy pawn attacking it, by square. Index: pawn color relative to
+// the perspective, oriented target square, kind and attacker square, counting only the
+// squares from which that kind can attack the target.
+struct PawnAtkThreats {
+    static constexpr std::string_view NAME = "PawnAtk_Threats";
+
+    static constexpr int KINDS = 12;
+    // At most 32 targets (16 per color), each with at most 18 non-pawn attackers, the
+    // double-attack feature and 2 enemy pawns; real positions use about 15.
+    static constexpr int MAX_ACTIVE_FEATURES = 32 * 21;
+
+    struct Table {
+        std::uint64_t reach[2][64][KINDS];
+        int           offset[2][64][KINDS];
+        int           total;
+    };
+
+    // Indexed by pawn color relative to the perspective (0: the perspective's pawns, which
+    // advance towards the oriented 8th rank), oriented target square and kind.
+    static constexpr Table table = []() {
+        Table                   t{};
+        constexpr auto          pseudo     = bb::detail::generatePseudoAttacks();
+        constexpr std::uint64_t PawnRanks  = 0x00FFFFFFFFFFFF00ULL;
+        int                     offset     = 0;
+        for (int c = 0; c < 2; ++c)
+            for (int s = 0; s < 64; ++s)
+            {
+                // Pawns on ranks 2 to 7 attack ranks 3 to 8 (color 0) or 1 to 6 (color 1)
+                int  rank   = s / 8;
+                bool target = c == 0 ? rank >= 2 : rank <= 5;
+                for (int k = 0; k < KINDS; ++k)
+                {
+                    std::uint64_t reach = 0;
+                    if (target && k < 10)
+                        reach = pseudo[PieceType(k % 5 + 1)][Square(s)].bits();
+                    else if (target && k == 10)
+                        reach = 1ULL << s;
+                    else if (target && k == 11)
+                        reach = bb::pawnAttacks(Bitboard::square(Square(s)),
+                                                c == 0 ? Color::White : Color::Black)
+                                  .bits()
+                              & PawnRanks;
+                    t.reach[c][s][k]  = reach;
+                    t.offset[c][s][k] = offset;
+                    offset += Bitboard::fromBits(reach).count();
+                }
+            }
+        t.total = offset;
+        return t;
+    }();
+
+    static constexpr int INPUTS = table.total;
+    static_assert(INPUTS == 11464);
+
+    static int index(int rel, int target, int kind, int a_o) {
+        assert(table.reach[rel][target][kind] >> a_o & 1);
+        return table.offset[rel][target][kind]
+             + Bitboard::fromBits(table.reach[rel][target][kind] & ((1ULL << a_o) - 1)).count();
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        Bitboard occupied = pos.piecesBB();
+        Bitboard pawns    = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+        int      k        = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            int      rel     = static_cast<int>(c) ^ static_cast<int>(color);
+            Bitboard own     = pos.piecesBB(Piece(PieceType::Pawn, c));
+            Bitboard enemy   = pos.piecesBB(Piece(PieceType::Pawn, !c));
+            Bitboard targets = bb::pawnAttacks(own, c) & ~occupied;
+
+            for (Square t : targets)
+            {
+                int t_o = static_cast<int>(t) ^ orient;
+                for (Color side : {c, !c})
+                    for (Square a : pos.attackers(t, side) & ~pawns)
+                    {
+                        int kind = static_cast<int>(pos.pieceAt(a).type()) - 1 + (side == c ? 0 : 5);
+                        features[k++] = index(rel, t_o, kind, static_cast<int>(a) ^ orient);
+                    }
+                if ((bb::pawnAttacks(Bitboard::square(t), !c) & own).count() >= 2)
+                    features[k++] = index(rel, t_o, 10, t_o);
+                for (Square a : bb::pawnAttacks(Bitboard::square(t), c) & enemy)
+                    features[k++] = index(rel, t_o, 11, static_cast<int>(a) ^ orient);
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PawnAtkThreatsExtractor: IFeatureExtractor {
+    int inputs() const override { return PawnAtkThreats::INPUTS; }
+    int max_active_features() const override { return PawnAtkThreats::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PawnAtkThreats::fill_features_sparse(e, features, color);
+    }
+};
+
 // The perspective's own passed pawns: no enemy pawn ahead on the same or an adjacent file.
 // Index: pawn square (ranks 2 to 7).
 struct Passed48 {
@@ -930,6 +1041,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<StopAtkExtractor>();
     if (name == "Stop_Threats")
         return std::make_unique<StopThreatsExtractor>();
+    if (name == "PawnAtk_Threats")
+        return std::make_unique<PawnAtkThreatsExtractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;

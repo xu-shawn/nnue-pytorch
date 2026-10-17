@@ -11,6 +11,7 @@ from .input_feature import InputFeature
 from .k32q2 import K32Q2
 from .passed_48 import Passed48
 from .pawn_push import PawnPush
+from .pawnatk_threats import PawnAtkThreats
 from .pp_3wide import PP3Wide
 from .promo_atk import PromoAtk
 from .promo_atk_sq import PromoAtkSq
@@ -27,6 +28,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "Promo_AtkSq": PromoAtkSq,
     "Stop_Atk": StopAtk,
     "Stop_Threats": StopThreats,
+    "PawnAtk_Threats": PawnAtkThreats,
     "Passed_48": Passed48,
 }
 
