@@ -33,9 +33,12 @@ class LayerStacks(nn.Module):
         # Block kind of the hidden layers after l1: c (64 -> 64 crelu), s (64 -> 64
         # sqr-crelu), g (psq gate), glu (self-gated), add (psq added); None for the
         # plain sqr|crelu layers. Used by the resN<x> and deepN<x> variants.
-        m = re.fullmatch(r"deep\d+(c|s|g|glu|add)i?", variant)
+        m = re.fullmatch(r"deep\d+(c|s|g|glu|add1|add)i?", variant)
+        # deepNadd1: one 768 -> L3 piece-square layer shared by all hidden layers (one
+        # 32-wide accumulator in the engine instead of one per layer)
+        self.psq_shared = m is not None and m.group(1) == "add1"
         self.block = (
-            m.group(1)
+            m.group(1).rstrip("1")
             if m
             else {
                 "resc3": "c",
@@ -56,6 +59,7 @@ class LayerStacks(nn.Module):
         #   deepN   noskip plus N more 64 -> 32 hidden layers in a chain
         #   deepN..i  with the hidden layers after l1 starting at bias 0.25, so that their
         #           activations are not all rounded to zero at initialisation
+        #   deepNadd1  deepNadd with one piece-square layer shared by all hidden layers
         #   deepNx  deepN with every hidden layer after l1 of block kind x (c, s, g, glu,
         #           add; see the res variants below for what each block does)
         #   res64   64-wide stream: s = clip(s + act(W s)), act = sqr|crelu concat (64),
@@ -94,7 +98,7 @@ class LayerStacks(nn.Module):
                 "resglu3",
                 "resadd3",
             )
-            or re.fullmatch(r"deep\d+(c|s|g|glu|add)?i?", v) is not None
+            or re.fullmatch(r"deep\d+(c|s|g|glu|add1|add)?i?", v) is not None
             or (v.startswith("res") and v[3:].isdigit())
             or re.fullmatch(r"res\d+d", v) is not None
         ), v
@@ -127,7 +131,7 @@ class LayerStacks(nn.Module):
         if self.block == "g":
             n_psq, w_psq = 1 + extra, 2 * self.L3
         elif self.block == "add":
-            n_psq, w_psq = 1 + extra, self.L3
+            n_psq, w_psq = 1 if self.psq_shared else 1 + extra, self.L3
         self.psq_fresh = nn.ModuleList(nn.Linear(768, w_psq) for _ in range(n_psq))
         # resNd: a signed 64 -> 64 projection after each block's activation, so the
         # residual update can be negative
@@ -135,7 +139,7 @@ class LayerStacks(nn.Module):
             StackedLinear(self.L3 * 2, self.L3 * 2, count, quantization, "ls_l2")
             for _ in range(1 + extra if re.fullmatch(r"res\d+d", v) else 0)
         )
-        if re.fullmatch(r"deep\d+(c|s|g|glu|add)?i", v):
+        if re.fullmatch(r"deep\d+(c|s|g|glu|add1|add)?i", v):
             with torch.no_grad():
                 for layer in [self.l2, *self.extra]:
                     layer.linear.bias.fill_(0.25)
@@ -173,7 +177,8 @@ class LayerStacks(nn.Module):
         """Hidden layer k of kind self.block applied to the 64-wide activations h."""
         b = self.block
         if b == "add":
-            return self._act(layer(h, ls_indices, fq_w) + self.psq_fresh[k](psq), fq_a)
+            v = self.psq_fresh[0 if self.psq_shared else k](psq)
+            return self._act(layer(h, ls_indices, fq_w) + v, fq_a)
         t = layer(h, ls_indices, fq_w)
         if b == "c":
             return self._crelu(t, fq_a)
