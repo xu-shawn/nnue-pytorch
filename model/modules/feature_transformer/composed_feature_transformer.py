@@ -8,6 +8,29 @@ from ..features.input_feature import InputFeature
 from .double_ft_functions import double_feature_transform
 
 
+# The fused FT kernels take their width from the index tensors, are tuned for 288, and the
+# aggregated backward runs only up to 288. Feature sets that reserve more slots (Promo_Atk)
+# rarely use them: when no position in the batch has an active index past column 288, the
+# rest is -1 padding and can be dropped, which keeps the fast kernels and changes nothing.
+_KERNEL_WIDTH = 288
+
+
+def _trim_padding(
+    white_indices: torch.Tensor, black_indices: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if white_indices.shape[1] <= _KERNEL_WIDTH:
+        return white_indices, black_indices
+    beyond = torch.maximum(
+        white_indices[:, _KERNEL_WIDTH:].max(), black_indices[:, _KERNEL_WIDTH:].max()
+    )
+    if int(beyond) >= 0:
+        return white_indices, black_indices
+    return (
+        white_indices[:, :_KERNEL_WIDTH].contiguous(),
+        black_indices[:, :_KERNEL_WIDTH].contiguous(),
+    )
+
+
 class ComposedFeatureTransformer(nn.Module):
     """Thin coordinator that wraps one or more InputFeature modules.
 
@@ -117,6 +140,7 @@ class ComposedFeatureTransformer(nn.Module):
     ) -> torch.Tensor:
         merged, bias = self.merged_weight_and_bias(fake_quantize_weights)
         ft_max_act = self.quantization.max_ft_activation
+        white_indices, black_indices = _trim_padding(white_indices, black_indices)
 
         l0_ = double_feature_transform(
             us,
