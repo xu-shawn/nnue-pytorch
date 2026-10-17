@@ -5,6 +5,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import ComposedFeatureTransformer, LayerStacks, get_feature_cls
+from .modules.feature_transformer import double_feature_transform
 from .quantize import QuantizationManager
 
 
@@ -35,6 +36,10 @@ class NNUEModel(nn.Module):
         #                   the l1 outputs (changes only on captures and promotions)
         #   scale           drawishness: the output is multiplied by 2 * sigmoid(s), s linear
         #                   in the material features and pawn files (starts at exactly 1)
+        #   matft           12 piece-type inputs per perspective (one per piece, no square)
+        #                   with int16 weights in the feature transformer, so that material
+        #                   values need not fill the int8 piece-square weights; an extra
+        #                   accumulator that only changes on captures and promotions
         _, *self.ls_options = os.environ.get("NNUE_LS_VARIANT", "base").split("+")
         self.bucket_mode = next(
             (o for o in self.ls_options if o.startswith("bk")), None
@@ -62,6 +67,12 @@ class NNUEModel(nn.Module):
             self.register_buffer("threat_kinds", _threat_kind_table(), persistent=False)
         else:
             self.threat_kinds = None
+
+        self.mat_ft = (
+            nn.Parameter(torch.zeros(12, self.L1))
+            if "matft" in self.ls_options
+            else None
+        )
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
@@ -113,14 +124,56 @@ class NNUEModel(nn.Module):
         fake_quantize_acts: bool,
         fake_quantize_weights: bool,
     ) -> torch.Tensor:
-        return self.input(
+        if self.mat_ft is None:
+            return self.input(
+                us,
+                them,
+                white_indices,
+                black_indices,
+                fake_quantize_acts,
+                fake_quantize_weights,
+            )
+        # matft: every K32Q2 index also activates the row of its piece type (plane // 64)
+        # in a 12-row int16 block appended after the regular inputs
+        merged, bias = self.input.merged_weight_and_bias(fake_quantize_weights)
+        mat = self.mat_ft
+        if fake_quantize_weights:
+            mat = self.quantization.fake_quantize_weights(mat, "ft_weight")
+        n_in = merged.shape[0]
+        merged = torch.cat([merged, mat], dim=0)
+
+        def extend(idx):
+            # The fused kernels read only the reserved width, and rows are packed (valid
+            # indices first, then -1), so the piece-type indices go into the padding right
+            # after each row's valid entries
+            rel = idx - self.psq_offset
+            is_psq = (idx >= 0) & (rel >= 0) & (rel < self.psq_span)
+            extra = n_in + (rel % 768) // 64
+            col = torch.arange(idx.shape[1], device=idx.device).expand_as(idx)
+            n_valid = (idx >= 0).sum(1, keepdim=True)
+            tgt = n_valid + is_psq.long().cumsum(1) - 1
+            assert int((tgt * is_psq).max()) < idx.shape[1], "no room for piece types"
+            keep = col < n_valid
+            tgt = torch.where(
+                is_psq, tgt, torch.where(keep, col, torch.zeros_like(col))
+            )
+            first = idx[:, :1].expand_as(idx)
+            val = torch.where(is_psq, extra, torch.where(keep, idx, first))
+            return idx.clone().scatter_(1, tgt, val)
+
+        l0_ = double_feature_transform(
             us,
             them,
-            white_indices,
-            black_indices,
-            fake_quantize_acts,
-            fake_quantize_weights,
+            extend(white_indices),
+            extend(black_indices),
+            merged,
+            bias,
+            self.quantization.max_ft_activation,
+            self.L1,
         )
+        if fake_quantize_acts:
+            l0_ = self.quantization.fake_quantize_ft_act(l0_)
+        return l0_ * self.quantization.l0_correction_factor
 
     def calculate_buckets(self, piece_count: torch.Tensor, queen_bucket: torch.Tensor):
         if self.bucket_mode == "bkpc8":

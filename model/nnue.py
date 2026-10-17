@@ -232,6 +232,12 @@ class NNUE(nn.Module):
                 "lr": LRs[8],
                 "weight_decay": dense_wd,
             },
+            # matft: int16 piece-type rows of the feature transformer
+            {
+                "params": [self.model.mat_ft] if self.model.mat_ft is not None else [],
+                "lr": LRs[0],
+                "weight_decay": 0.0,
+            },
             # Architecture experiments: psqt output term (like FT weights, no decay) and
             # threat-kind counts into l2 (like the piece-square layers)
             {

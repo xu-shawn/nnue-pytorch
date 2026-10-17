@@ -72,6 +72,7 @@ class LayerStacks(nn.Module):
                     "bkpc16",
                     "mat",
                     "scale",
+                    "matft",
                 ) or re.fullmatch(r"pnk?\d+(x2)?", o), o
         # +psqt: per-stack linear piece-square term on the output (an int32 accumulator
         # with one lane per stack in the engine); +tk: threat-kind counts into l2
