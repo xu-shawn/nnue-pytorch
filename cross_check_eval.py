@@ -362,6 +362,12 @@ def init_random_weights(model: M.NNUEModel) -> None:
                 ls.factorized_linear.bias.data.uniform_(-0.5, 0.5)
                 touched.add(id(ls.factorized_linear.bias))
 
+        # Material input: int32 at the l1 bias scale, so the same range as those biases
+        model.material.linear.weight.data.uniform_(-0.5, 0.5)
+        model.material.linear.bias.data.uniform_(-0.5, 0.5)
+        touched.add(id(model.material.linear.weight))
+        touched.add(id(model.material.linear.bias))
+
         all_param_ids = {id(p) for p in model.parameters()}
         untouched = all_param_ids - touched
         if untouched:

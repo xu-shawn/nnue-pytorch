@@ -119,6 +119,8 @@ class QuantizationManager:
             "ls_l2_bias": self.weight_scale_hidden[1] * self.hidden_quantized_one,
             "ls_output_weight": self.weight_scale_hidden[2],
             "ls_output_bias": self.weight_scale_hidden[2] * self.hidden_quantized_one,
+            # Material input: int32, added to the l1 accumulators, so l1 bias scale
+            "material": self.weight_scale_hidden[0] * self.hidden_quantized_one,
         }
 
     def get_ft_weight_bounds(self, dtype: torch.dtype) -> tuple[float, float]:
@@ -256,3 +258,23 @@ class QuantizationManager:
         weight = weight.divide(self.weight_scales_dict[weight_key])
 
         return bias, weight
+
+    def quantize_material(
+        self,
+        bias: torch.Tensor,
+        weight: torch.Tensor,
+        callback: Callable | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        scale = self.weight_scales_dict["material"]
+        bias = _safe_convert(bias.mul(scale), torch.int32)
+        weight = _safe_convert(weight.mul(scale), torch.int32)
+        if callback is not None:
+            callback("material_bias", bias)
+            callback("material_weight", weight)
+        return bias, weight
+
+    def dequantize_material(
+        self, bias: torch.Tensor, weight: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        scale = self.weight_scales_dict["material"]
+        return bias.divide(scale), weight.divide(scale)

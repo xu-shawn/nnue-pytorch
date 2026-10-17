@@ -198,6 +198,17 @@ class NNUE(nn.Module):
                 "lr": LRs[9],
                 "weight_decay": 0.0,
             },
+            # Material input (like the l1 weights and biases)
+            {
+                "params": [self.model.material.linear.weight],
+                "lr": LRs[4],
+                "weight_decay": dense_wd,
+            },
+            {
+                "params": [self.model.material.linear.bias],
+                "lr": LRs[5],
+                "weight_decay": 0.0,
+            },
         ]
 
         train_params = [group for group in train_params if len(group["params"]) > 0]

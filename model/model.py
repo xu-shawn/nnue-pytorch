@@ -3,6 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import ComposedFeatureTransformer, LayerStacks, get_feature_cls
+from .modules.material_input import MaterialInput
 from .quantize import QuantizationManager
 
 
@@ -29,6 +30,19 @@ class NNUEModel(nn.Module):
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
+
+        # Material input into the first layer-stack layer, computed from the side to
+        # move's K32Q2 piece-square indices
+        psq_offset = 0
+        for f in self.input.features:
+            if f.INPUT_FEATURE_NAME == "K32Q2":
+                break
+            psq_offset += f.NUM_INPUTS
+        else:
+            raise ValueError("the material input needs the K32Q2 feature set")
+        self.material = MaterialInput(
+            self.L2, psq_offset, f.NUM_INPUTS, self.quantization
+        )
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
@@ -114,8 +128,16 @@ class NNUEModel(nn.Module):
             fake_quantize_acts,
             fake_quantize_weights,
         )
+        stm_indices = torch.where(us.view(-1, 1) > 0.5, white_indices, black_indices)
+        material = self.material(
+            self.material.feature_indices(stm_indices), fake_quantize_weights
+        )
         x = self.layer_stacks(
-            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights
+            l0_,
+            layer_stack_indices,
+            fake_quantize_acts,
+            fake_quantize_weights,
+            material,
         )
 
         return x

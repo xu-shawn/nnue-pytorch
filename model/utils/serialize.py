@@ -11,6 +11,7 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
+from ..modules import material_input
 
 
 def ascii_hist(name, x, bins=7):
@@ -108,6 +109,10 @@ class NNUEWriter:
                 model, output, layer_stacks.output.layer_key, f"bucket {bucket}"
             )
 
+        # 3. Material input (shared by all layer stacks)
+        self.int32(material_input.HASH)
+        self.write_material(model)
+
     @staticmethod
     def fc_hash(model: NNUEModel) -> int:
         # InputSlice hash
@@ -202,6 +207,15 @@ class NNUEWriter:
         # Weights stored as [outputs][inputs], so we can flatten
         self.write_tensor(weight)
 
+    def write_material(self, model: NNUEModel) -> None:
+        # int32 biases [outputs], then int32 weights [features][outputs]
+        layer = model.material.linear
+        bias, weight = model.quantization.quantize_material(
+            layer.bias.data, layer.weight.data, get_histogram_callback("", self.verbose)
+        )
+        self.write_tensor(bias)
+        self.write_tensor(weight.t().contiguous())
+
     def int32(self, v: int) -> None:
         self.buf.extend(struct.pack("<I", v))
 
@@ -250,6 +264,17 @@ class NNUEReader:
                     l_b_slices[layer_idx][b],
                     layers[layer_idx].layer_key,
                 )
+
+        self.read_int32(material_input.HASH)
+        self.read_material()
+
+    def read_material(self) -> None:
+        layer = self.model.material.linear
+        bias = self.tensor(np.int32, [layer.out_features])
+        weight = self.tensor(np.int32, [layer.in_features, layer.out_features])
+        bias, weight = self.model.quantization.dequantize_material(bias, weight)
+        layer.bias.data.copy_(bias)
+        layer.weight.data.copy_(weight.t())
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
