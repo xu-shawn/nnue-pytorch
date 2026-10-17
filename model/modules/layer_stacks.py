@@ -36,6 +36,7 @@ class LayerStacks(nn.Module):
         #   deepN   noskip plus N more 64 -> 32 hidden layers in a chain
         #   res64   64-wide stream: s = clip(s + act(W s)), act = sqr|crelu concat (64),
         #           3 blocks with their own weights (l2 is the first)
+        #   resN    as res64 with N blocks
         #   rec64   as res64 but one block (l2) applied 3 times
         #   att32   32-wide stream: s = clip(s + crelu(W act(s)) * crelu(V x)), where V
         #           derives 32 fresh neurons from the feature transformer output x, 2 blocks
@@ -54,11 +55,16 @@ class LayerStacks(nn.Module):
             "att32",
             "att32p",
             "att32pu",
-        ) or (v.startswith("deep") and v[4:].isdigit()), v
+        ) or (
+            (v.startswith("deep") and v[4:].isdigit())
+            or (v.startswith("res") and v[3:].isdigit())
+        ), v
         if v.startswith("deep"):
             extra = int(v[4:])
         elif v == "res64":
             extra = 2
+        elif v.startswith("res") and v[3:].isdigit():
+            extra = int(v[3:]) - 1
         elif v in ("att32", "att32p", "att32pu"):
             extra = 1
         else:
@@ -115,9 +121,9 @@ class LayerStacks(nn.Module):
             h = self._act(self.l2(self._act(l1c_, fq_a), ls_indices, fq_w), fq_a)
             for layer in self.extra:
                 h = self._act(layer(h, ls_indices, fq_w), fq_a)
-        elif v in ("res64", "rec64"):
+        elif v == "rec64" or v.startswith("res"):
             h = self._act(l1c_, fq_a)
-            blocks = [self.l2, *self.extra] if v == "res64" else [self.l2] * 3
+            blocks = [self.l2] * 3 if v == "rec64" else [self.l2, *self.extra]
             for layer in blocks:
                 h = self.quantization.clip_ls_act(
                     h + self._act(layer(h, ls_indices, fq_w), fq_a)
