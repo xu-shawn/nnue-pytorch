@@ -29,11 +29,13 @@ class LayerStacks(nn.Module):
         self.l1 = FactorizedStackedLinear(
             2 * self.L1 // 2, self.L2, count, quantization, "ls_l1"
         )
-        variant = os.environ.get("NNUE_LS_VARIANT", "base")
+        # NNUE_LS_VARIANT is "<variant>[+option...]"; options: fact (as NNUE_LS_FACT=1),
+        # l1s<x> (as NNUE_L1_SCALE=x)
+        variant, *options = os.environ.get("NNUE_LS_VARIANT", "base").split("+")
         # Block kind of the hidden layers after l1: c (64 -> 64 crelu), s (64 -> 64
         # sqr-crelu), g (psq gate), glu (self-gated), add (psq added); None for the
         # plain sqr|crelu layers. Used by the resN<x> and deepN<x> variants.
-        m = re.fullmatch(r"deep\d+(c|s|g|glu|add1|add)i?", variant)
+        m = re.fullmatch(r"s?deep\d+(c|s|g|glu|add1|add)i?", variant)
         # deepNadd1: one 768 -> L3 piece-square layer shared by all hidden layers (one
         # 32-wide accumulator in the engine instead of one per layer)
         self.psq_shared = m is not None and m.group(1) == "add1"
@@ -51,7 +53,20 @@ class LayerStacks(nn.Module):
         block_out = {"c": 2 * self.L3, "s": 2 * self.L3, "glu": 4 * self.L3}.get(
             self.block, self.L3
         )
-        self.l2 = StackedLinear(self.L2 * 2, block_out, count, quantization, "ls_l2")
+        # NNUE_LS_FACT=1: l2 and the output layer also get a component shared by all
+        # stacks, like l1 (coalesced at export, so free at inference). Most of the 32
+        # stacks see under 1% of the positions each.
+        self.ls_fact = os.environ.get("NNUE_LS_FACT", "0") == "1" or "fact" in options
+        # NNUE_L1_SCALE: scale of the l1 outputs entering the activations (the skip path
+        # is unchanged); 0.5 is one more right shift in the engine, halving saturation
+        self.l1_scale = float(os.environ.get("NNUE_L1_SCALE", "1.0"))
+        for o in options:
+            if o.startswith("l1s"):
+                self.l1_scale = float(o[3:])
+            else:
+                assert o == "fact", o
+        ls_cls = FactorizedStackedLinear if self.ls_fact else StackedLinear
+        self.l2 = ls_cls(self.L2 * 2, block_out, count, quantization, "ls_l2")
 
         # Depth experiments (proxy runs only; the serializer knows only "base"):
         #   base    the current layers, output sees both hidden layers plus a skip path
@@ -60,6 +75,8 @@ class LayerStacks(nn.Module):
         #   deepN..i  with the hidden layers after l1 starting at bias 0.25, so that their
         #           activations are not all rounded to zero at initialisation
         #   deepNadd1  deepNadd with one piece-square layer shared by all hidden layers
+        #   sdeepN..  as deepN.. but dense like the base net: the output sees the l1
+        #           activations and every hidden layer's, plus the skip path
         #   deepNx  deepN with every hidden layer after l1 of block kind x (c, s, g, glu,
         #           add; see the res variants below for what each block does)
         #   res64   64-wide stream: s = clip(s + act(W s)), act = sqr|crelu concat (64),
@@ -80,7 +97,7 @@ class LayerStacks(nn.Module):
         #   resglu3 self-gated blocks: s = clip(s + crelu(A s) * crelu(B s)), A, B 64 -> 64
         #   resadd3 piece-square neurons added instead of multiplied:
         #           s = clip(s + act(W s + V psq)), V 768 -> 32 shared by all stacks
-        self.variant = os.environ.get("NNUE_LS_VARIANT", "base")
+        self.variant = variant
         v = self.variant
         assert (
             v
@@ -98,12 +115,13 @@ class LayerStacks(nn.Module):
                 "resglu3",
                 "resadd3",
             )
-            or re.fullmatch(r"deep\d+(c|s|g|glu|add1|add)?i?", v) is not None
+            or re.fullmatch(r"s?deep\d+(c|s|g|glu|add1|add)?i?", v) is not None
             or (v.startswith("res") and v[3:].isdigit())
             or re.fullmatch(r"res\d+d", v) is not None
         ), v
-        if v.startswith("deep"):
-            extra = int(re.match(r"deep(\d+)", v).group(1))
+        self.dense = v.startswith("sdeep")
+        if v.startswith(("deep", "sdeep")):
+            extra = int(re.match(r"s?deep(\d+)", v).group(1))
         elif v == "res64":
             extra = 2
         elif re.fullmatch(r"res\d+d", v):
@@ -139,7 +157,7 @@ class LayerStacks(nn.Module):
             StackedLinear(self.L3 * 2, self.L3 * 2, count, quantization, "ls_l2")
             for _ in range(1 + extra if re.fullmatch(r"res\d+d", v) else 0)
         )
-        if re.fullmatch(r"deep\d+(c|s|g|glu|add1|add)?i", v):
+        if re.fullmatch(r"s?deep\d+(c|s|g|glu|add1|add)?i", v):
             with torch.no_grad():
                 for layer in [self.l2, *self.extra]:
                     layer.linear.bias.fill_(0.25)
@@ -152,8 +170,13 @@ class LayerStacks(nn.Module):
                 for gate in self.psq_fresh:
                     gate.bias.fill_(1.0)
 
-        self.output = StackedLinear(
-            self.L2 * 2 + self.L3 * 2 if v == "base" else self.L3 * 2,
+        out_in = self.L3 * 2
+        if v == "base":
+            out_in = self.L2 * 2 + self.L3 * 2
+        elif self.dense:
+            out_in = self.L2 * 2 + (1 + extra) * self.L3 * 2
+        self.output = ls_cls(
+            out_in,
             1,
             count,
             quantization,
@@ -245,6 +268,24 @@ class LayerStacks(nn.Module):
         l1c_ = self.l1(x, ls_indices, fq_w)
         v = self.variant
 
+        if self.dense:
+            h = self._act(l1c_ * self.l1_scale, fq_a)
+            hs = [h]
+            for k, layer in enumerate([self.l2, *self.extra]):
+                if self.block is None:
+                    h = self._act(layer(h, ls_indices, fq_w), fq_a)
+                else:
+                    h = self._block(layer, k, h, ls_indices, psq, fq_a, fq_w)
+                hs.append(h)
+            skip = l1c_[:, -2:-1] - l1c_[:, -1:]
+            out = self.output(torch.cat(hs, dim=1), ls_indices, fq_w)
+            if fq_a:
+                skip = self.quantization.fake_quantize_skip_act(skip)
+            out = out + skip
+            if fq_a:
+                out = self.quantization.fake_quantize_output(out)
+            return out
+
         if v.startswith("deep") and self.block is not None:
             h = self._act(l1c_, fq_a)
             for k, layer in enumerate([self.l2, *self.extra]):
@@ -312,7 +353,7 @@ class LayerStacks(nn.Module):
 
         # Extract the short-path skip connection before fake quantization
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
-        l1x_ = l1c_
+        l1x_ = l1c_ * self.l1_scale if self.l1_scale != 1.0 else l1c_
 
         l1_sqr = torch.pow(l1x_, 2.0)
         if fake_quantize_acts:

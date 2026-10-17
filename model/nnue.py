@@ -232,6 +232,31 @@ class NNUE(nn.Module):
                 "lr": LRs[8],
                 "weight_decay": dense_wd,
             },
+            # NNUE_LS_FACT: shared components of l2 and the output layer, like l1's
+            {
+                "params": [
+                    layer.factorized_linear.weight
+                    for layer in (
+                        self.model.layer_stacks.l2,
+                        self.model.layer_stacks.output,
+                    )
+                    if hasattr(layer, "factorized_linear")
+                ],
+                "lr": LRs[2],
+                "weight_decay": factorized_wd,
+            },
+            {
+                "params": [
+                    layer.factorized_linear.bias
+                    for layer in (
+                        self.model.layer_stacks.l2,
+                        self.model.layer_stacks.output,
+                    )
+                    if hasattr(layer, "factorized_linear")
+                ],
+                "lr": LRs[3],
+                "weight_decay": 0.0,
+            },
             {
                 "params": [self.model.layer_stacks.output.linear.bias],
                 "lr": LRs[9],
