@@ -28,7 +28,13 @@ class LayerStacks(nn.Module):
         self.l1 = FactorizedStackedLinear(
             2 * self.L1 // 2, self.L2, count, quantization, "ls_l1"
         )
-        self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
+        variant = os.environ.get("NNUE_LS_VARIANT", "base")
+        block_out = {
+            "resc3": 2 * self.L3,
+            "ress3": 2 * self.L3,
+            "resglu3": 4 * self.L3,
+        }.get(variant, self.L3)
+        self.l2 = StackedLinear(self.L2 * 2, block_out, count, quantization, "ls_l2")
 
         # Depth experiments (proxy runs only; the serializer knows only "base"):
         #   base    the current layers, output sees both hidden layers plus a skip path
@@ -45,18 +51,32 @@ class LayerStacks(nn.Module):
         #           (an extra accumulator in the engine)
         #   att32pu as att32p, but each layer stack has its own 768 -> 32 layer (int8,
         #           computed from the ~32 active inputs at evaluation in the engine)
+        #   resc3   res64 without the 32 bottleneck: 3 blocks s = clip(s + crelu(W s)), W 64 -> 64
+        #   ress3   as resc3 with sqr-clipped-relu
+        #   resg3   res64 with a gate from the 768 piece-square inputs:
+        #           s = clip(s + act(W s) * crelu(V psq)), V 768 -> 64 shared by all stacks
+        #   resglu3 self-gated blocks: s = clip(s + crelu(A s) * crelu(B s)), A, B 64 -> 64
+        #   resadd3 piece-square neurons added instead of multiplied:
+        #           s = clip(s + act(W s + V psq)), V 768 -> 32 shared by all stacks
         self.variant = os.environ.get("NNUE_LS_VARIANT", "base")
         v = self.variant
-        assert v in (
-            "base",
-            "noskip",
-            "res64",
-            "rec64",
-            "att32",
-            "att32p",
-            "att32pu",
-        ) or (
-            (v.startswith("deep") and v[4:].isdigit())
+        assert (
+            v
+            in (
+                "base",
+                "noskip",
+                "res64",
+                "rec64",
+                "att32",
+                "att32p",
+                "att32pu",
+                "resc3",
+                "ress3",
+                "resg3",
+                "resglu3",
+                "resadd3",
+            )
+            or (v.startswith("deep") and v[4:].isdigit())
             or (v.startswith("res") and v[3:].isdigit())
         ), v
         if v.startswith("deep"):
@@ -65,12 +85,14 @@ class LayerStacks(nn.Module):
             extra = 2
         elif v.startswith("res") and v[3:].isdigit():
             extra = int(v[3:]) - 1
+        elif v in ("resc3", "ress3", "resg3", "resglu3", "resadd3"):
+            extra = 2
         elif v in ("att32", "att32p", "att32pu"):
             extra = 1
         else:
             extra = 0
         self.extra = nn.ModuleList(
-            StackedLinear(self.L3 * 2, self.L3, count, quantization, "ls_l2")
+            StackedLinear(self.L3 * 2, block_out, count, quantization, "ls_l2")
             for _ in range(extra)
         )
         # Fresh neurons from the feature transformer output, one set per att32 block
@@ -80,9 +102,12 @@ class LayerStacks(nn.Module):
             )
             for _ in range(2 if v in ("att32", "att32pu") else 0)
         )
-        self.psq_fresh = nn.ModuleList(
-            nn.Linear(768, self.L3) for _ in range(2 if v == "att32p" else 0)
-        )
+        n_psq, w_psq = {
+            "att32p": (2, self.L3),
+            "resg3": (3, 2 * self.L3),
+            "resadd3": (3, self.L3),
+        }.get(v, (0, 0))
+        self.psq_fresh = nn.ModuleList(nn.Linear(768, w_psq) for _ in range(n_psq))
 
         self.output = StackedLinear(
             self.L2 * 2 + self.L3 * 2 if v == "base" else self.L3 * 2,
@@ -105,6 +130,15 @@ class LayerStacks(nn.Module):
             x = self.quantization.fake_quantize_ls_act(x)
         return self.quantization.clip_ls_act(torch.cat([sqr, x], dim=1))
 
+    def _sqr(self, x: torch.Tensor, fake_quantize_acts: bool) -> torch.Tensor:
+        """sqr-clipped-relu alone, scaled like the first half of _act."""
+        sqr = torch.pow(x, 2.0)
+        if fake_quantize_acts:
+            sqr = self.quantization.fake_quantize_ls_act(sqr)
+        return self.quantization.clip_ls_act(
+            sqr * self.quantization.sqr_crelu_correction_factor
+        )
+
     def _crelu(self, x: torch.Tensor, fake_quantize_acts: bool) -> torch.Tensor:
         if fake_quantize_acts:
             x = self.quantization.fake_quantize_ls_act(x)
@@ -121,6 +155,32 @@ class LayerStacks(nn.Module):
             h = self._act(self.l2(self._act(l1c_, fq_a), ls_indices, fq_w), fq_a)
             for layer in self.extra:
                 h = self._act(layer(h, ls_indices, fq_w), fq_a)
+        elif v in ("resc3", "ress3", "resglu3", "resg3", "resadd3"):
+            h = self._act(l1c_, fq_a)
+            blocks = [self.l2, *self.extra]
+            for k, layer in enumerate(blocks):
+                if v == "resadd3":
+                    a = self._act(
+                        layer(h, ls_indices, fq_w) + self.psq_fresh[k](psq), fq_a
+                    )
+                else:
+                    t = layer(h, ls_indices, fq_w)
+                    if v == "resc3":
+                        a = self._crelu(t, fq_a)
+                    elif v == "ress3":
+                        a = self._sqr(t, fq_a)
+                    elif v == "resglu3":
+                        half = t.shape[1] // 2
+                        a = self._crelu(t[:, :half], fq_a) * self._crelu(
+                            t[:, half:], fq_a
+                        )
+                    else:  # resg3
+                        a = self._act(t, fq_a) * self._crelu(
+                            self.psq_fresh[k](psq), fq_a
+                        )
+                    if v in ("resglu3", "resg3") and fq_a:
+                        a = self.quantization.fake_quantize_ls_act(a)
+                h = self.quantization.clip_ls_act(h + a)
         elif v == "rec64" or v.startswith("res"):
             h = self._act(l1c_, fq_a)
             blocks = [self.l2] * 3 if v == "rec64" else [self.l2, *self.extra]
