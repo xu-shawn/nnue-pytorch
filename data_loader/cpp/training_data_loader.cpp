@@ -1058,6 +1058,177 @@ struct PassStopThreatsExtractor: IFeatureExtractor {
     }
 };
 
+// Pawn-piece pairs: every knight, bishop, rook, queen or king on the same or an adjacent file
+// as a pawn, at any rank. Index: pawn (colour relative to the perspective, oriented square),
+// piece kind (colour relative to the perspective, type) and the piece's square within the
+// pawn's three-file window. At most 16 pieces with 16 pawns, hence 256 slots.
+struct PawnPiece3Wide {
+    static constexpr std::string_view NAME = "PawnPiece_3Wide";
+
+    static constexpr int KINDS               = 10;
+    static constexpr int MAX_ACTIVE_FEATURES = 256;
+
+    struct Table {
+        int offset[2][64];        // first feature of each pawn (colour, oriented square)
+        int width[64];            // window squares per pawn square
+        std::uint64_t window[64]; // squares of the window (pawn square excluded)
+        int total;
+    };
+
+    static constexpr Table table = []() {
+        Table t{};
+        constexpr std::uint64_t FileA = 0x0101010101010101ULL;
+        int offset = 0;
+        for (int sq = 0; sq < 64; ++sq)
+        {
+            const int     f     = sq & 7;
+            std::uint64_t files = FileA << f;
+            if (f > 0)
+                files |= FileA << (f - 1);
+            if (f < 7)
+                files |= FileA << (f + 1);
+            t.window[sq] = files & ~(1ULL << sq);
+            t.width[sq]  = Bitboard::fromBits(t.window[sq]).count();
+        }
+        for (int c = 0; c < 2; ++c)
+            for (int sq = 8; sq < 56; ++sq)
+            {
+                t.offset[c][sq] = offset;
+                offset += KINDS * t.width[sq];
+            }
+        t.total = offset;
+        return t;
+    }();
+
+    static constexpr int INPUTS = table.total;
+    static_assert(INPUTS == 20160);
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        Bitboard pieces = pos.piecesBB() & ~(pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn));
+        int      k      = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            int rel = static_cast<int>(c) ^ static_cast<int>(color);
+            for (Square p : pos.piecesBB(Piece(PieceType::Pawn, c)))
+            {
+                int p_o = static_cast<int>(p) ^ orient;
+                for (Square q : pieces)
+                {
+                    int q_o = static_cast<int>(q) ^ orient;
+                    if (!(table.window[p_o] >> q_o & 1))
+                        continue;
+                    Piece pc   = pos.pieceAt(q);
+                    int   kind = (static_cast<int>(pc.color()) ^ static_cast<int>(color)) * 5
+                             + static_cast<int>(pc.type()) - 1;
+                    features[k++] =
+                      table.offset[rel][p_o] + kind * table.width[p_o]
+                      + Bitboard::fromBits(table.window[p_o] & ((1ULL << q_o) - 1)).count();
+                }
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PawnPiece3WideExtractor: IFeatureExtractor {
+    int inputs() const override { return PawnPiece3Wide::INPUTS; }
+    int max_active_features() const override { return PawnPiece3Wide::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PawnPiece3Wide::fill_features_sparse(e, features, color);
+    }
+};
+
+// Threats on each king's zone: every knight, bishop, rook or queen (of either colour)
+// attacking the king or an empty square next to it (the threat features cover attacks on
+// occupied squares except kings). Index: king colour relative to the perspective, oriented
+// target square, attacker kind relative to the king (own N, B, R, Q, then the enemy's) and
+// attacker square, counting only the squares from which that kind reaches the target.
+struct KingZoneThreats {
+    static constexpr std::string_view NAME = "KingZone_Threats";
+
+    static constexpr int KINDS = 8;
+    // 2 kings x 9 targets x at most 16 attackers (8 knights and a slider on each ray)
+    static constexpr int MAX_ACTIVE_FEATURES = 288;
+
+    struct Table {
+        std::uint64_t reach[64][KINDS];
+        int           offset[2][64][KINDS];
+        int           total;
+    };
+
+    static constexpr Table table = []() {
+        Table          t{};
+        constexpr auto pseudo = bb::detail::generatePseudoAttacks();
+        int            offset = 0;
+        for (int c = 0; c < 2; ++c)
+            for (int s = 0; s < 64; ++s)
+                for (int k = 0; k < KINDS; ++k)
+                {
+                    std::uint64_t reach = pseudo[PieceType(k % 4 + 1)][Square(s)].bits();
+                    t.reach[s][k]       = reach;
+                    t.offset[c][s][k]   = offset;
+                    offset += Bitboard::fromBits(reach).count();
+                }
+        t.total = offset;
+        return t;
+    }();
+
+    static constexpr int INPUTS = table.total;
+    static_assert(INPUTS == 12992);
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        constexpr auto pseudo = bb::detail::generatePseudoAttacks();
+        auto&          pos    = e.pos;
+        auto           ksq    = pos.kingSquare(color);
+        int            orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        Bitboard occupied = pos.piecesBB();
+        Bitboard minors   = occupied & ~(pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn)
+                                       | pos.piecesBB(whiteKing) | pos.piecesBB(blackKing));
+        int      k        = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            int      rel     = static_cast<int>(c) ^ static_cast<int>(color);
+            Square   king    = pos.kingSquare(c);
+            Bitboard targets = (pseudo[PieceType::King][king] & ~occupied) | Bitboard::square(king);
+            for (Square t : targets)
+            {
+                int t_o = static_cast<int>(t) ^ orient;
+                for (Square a : (pos.attackers(t, Color::White) | pos.attackers(t, Color::Black)) & minors)
+                {
+                    Piece pc   = pos.pieceAt(a);
+                    int   kind = static_cast<int>(pc.type()) - 1 + (pc.color() == c ? 0 : 4);
+                    int   a_o  = static_cast<int>(a) ^ orient;
+                    features[k++] =
+                      table.offset[rel][t_o][kind]
+                      + Bitboard::fromBits(table.reach[t_o][kind] & ((1ULL << a_o) - 1)).count();
+                }
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct KingZoneThreatsExtractor: IFeatureExtractor {
+    int inputs() const override { return KingZoneThreats::INPUTS; }
+    int max_active_features() const override { return KingZoneThreats::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return KingZoneThreats::fill_features_sparse(e, features, color);
+    }
+};
+
 // The perspective's own passed pawns: no enemy pawn ahead on the same or an adjacent file.
 // Index: pawn square (ranks 2 to 7).
 struct Passed48 {
@@ -1182,6 +1353,10 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PP_Wide2Extractor>();
     if (name == "PassStop_Threats")
         return std::make_unique<PassStopThreatsExtractor>();
+    if (name == "PawnPiece_3Wide")
+        return std::make_unique<PawnPiece3WideExtractor>();
+    if (name == "KingZone_Threats")
+        return std::make_unique<KingZoneThreatsExtractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;
