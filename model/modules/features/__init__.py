@@ -17,6 +17,7 @@ from .pp_wide2 import PPWide2
 from .promo_atk import PromoAtk
 from .promo_atk_sq import PromoAtkSq
 from .stop_atk import StopAtk
+from .passstop_threats import PassStopThreats
 from .stop_threats import StopThreats
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
@@ -30,6 +31,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "Promo_AtkSq": PromoAtkSq,
     "Stop_Atk": StopAtk,
     "Stop_Threats": StopThreats,
+    "PassStop_Threats": PassStopThreats,
     "PawnAtk_Threats": PawnAtkThreats,
     "Passed_48": Passed48,
 }

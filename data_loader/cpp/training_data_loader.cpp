@@ -978,6 +978,86 @@ struct PawnAtkThreatsExtractor: IFeatureExtractor {
     }
 };
 
+// Stop_Threats restricted to passed pawns (no enemy pawn ahead on the same or an adjacent
+// file), with Stop_Threats' index. Passers are rare, so these features change far less often.
+struct PassStopThreats {
+    static constexpr std::string_view NAME = "PassStop_Threats";
+
+    static constexpr int INPUTS              = StopThreats::INPUTS;
+    static constexpr int MAX_ACTIVE_FEATURES = StopThreats::MAX_ACTIVE_FEATURES;
+
+    static std::uint64_t passed(Color c, std::uint64_t white, std::uint64_t black) {
+        constexpr std::uint64_t FileA = 0x0101010101010101ULL;
+        constexpr std::uint64_t FileH = FileA << 7;
+
+        std::uint64_t enemy = c == Color::White ? black : white;
+        std::uint64_t span  = enemy | ((enemy << 1) & ~FileA) | ((enemy >> 1) & ~FileH);
+        std::uint64_t fill;
+        if (c == Color::White)
+        {
+            fill = span >> 8;
+            fill |= fill >> 8;
+            fill |= fill >> 16;
+            fill |= fill >> 32;
+        }
+        else
+        {
+            fill = span << 8;
+            fill |= fill << 8;
+            fill |= fill << 16;
+            fill |= fill << 32;
+        }
+        return (c == Color::White ? white : black) & ~fill;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        Bitboard occupied = pos.piecesBB();
+        Bitboard pawns    = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+        const std::uint64_t white = pos.piecesBB(whitePawn).bits(), black = pos.piecesBB(blackPawn).bits();
+        int k = 0;
+
+        for (Color c : {Color::White, Color::Black})
+        {
+            int rel = static_cast<int>(c) ^ static_cast<int>(color);
+
+            for (Square from : Bitboard::fromBits(passed(c, white, black)))
+            {
+                Square to = Square(static_cast<int>(from) + (c == Color::White ? 8 : -8));
+                if (occupied.isSet(to))
+                    continue;
+
+                int s = (static_cast<int>(from) ^ orient) - 8;
+                for (Color side : {c, !c})
+                    for (Square a : pos.attackers(to, side) & ~pawns)
+                    {
+                        int kind = static_cast<int>(pos.pieceAt(a).type()) - 1 + (side == c ? 0 : 5);
+                        int a_o  = static_cast<int>(a) ^ orient;
+                        features[k++] =
+                          StopThreats::table.offset[rel][s][kind]
+                          + Bitboard::fromBits(StopThreats::table.reach[rel][s][kind] & ((1ULL << a_o) - 1))
+                              .count();
+                    }
+            }
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PassStopThreatsExtractor: IFeatureExtractor {
+    int inputs() const override { return PassStopThreats::INPUTS; }
+    int max_active_features() const override { return PassStopThreats::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PassStopThreats::fill_features_sparse(e, features, color);
+    }
+};
+
 // The perspective's own passed pawns: no enemy pawn ahead on the same or an adjacent file.
 // Index: pawn square (ranks 2 to 7).
 struct Passed48 {
@@ -1100,6 +1180,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PawnAtkThreatsExtractor>();
     if (name == "PP_Wide2")
         return std::make_unique<PP_Wide2Extractor>();
+    if (name == "PassStop_Threats")
+        return std::make_unique<PassStopThreatsExtractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;
