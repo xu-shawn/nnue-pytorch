@@ -14,6 +14,7 @@ from .pawn_push import PawnPush
 from .pawnatk_threats import PawnAtkThreats
 from .kingzone_threats import KingZoneThreats
 from .pawnpiece_3wide import PawnPiece3Wide
+from .pawn_subsets import PawnContacts, PawnKR3Wide
 from .pp_3wide import PP3Wide
 from .pp_wide2 import PPWide2
 from .promo_atk import PromoAtk
@@ -36,6 +37,8 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "PassStop_Threats": PassStopThreats,
     "PawnPiece_3Wide": PawnPiece3Wide,
     "KingZone_Threats": KingZoneThreats,
+    "PawnKR_3Wide": PawnKR3Wide,
+    "Pawn_Contacts": PawnContacts,
     "PawnAtk_Threats": PawnAtkThreats,
     "Passed_48": Passed48,
 }

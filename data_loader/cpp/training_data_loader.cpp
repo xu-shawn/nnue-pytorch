@@ -1229,6 +1229,90 @@ struct KingZoneThreatsExtractor: IFeatureExtractor {
     }
 };
 
+// Subsets of PawnPiece_3Wide and PawnAtk_Threats with the same indices: pawn-king and
+// pawn-rook pairs only, and the enemy-pawn contacts (kind 11) of PawnAtk_Threats only.
+struct PawnKR3Wide {
+    static constexpr std::string_view NAME = "PawnKR_3Wide";
+
+    static constexpr int INPUTS              = PawnPiece3Wide::INPUTS;
+    static constexpr int MAX_ACTIVE_FEATURES = PawnPiece3Wide::MAX_ACTIVE_FEATURES;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        int tmp[PawnPiece3Wide::MAX_ACTIVE_FEATURES];
+        auto [n, inputs] = PawnPiece3Wide::fill_features_sparse(e, tmp, color);
+        int k = 0;
+        for (int i = 0; i < n; ++i)
+        {
+            // kind = (piece colour ^ perspective) * 5 + type - 1: rook 2, king 4
+            const auto& t    = PawnPiece3Wide::table;
+            int         base = 0;
+            // recover the kind from the index: find the pawn block containing it
+            int idx = tmp[i];
+            for (int c = 0; c < 2 && !base; ++c)
+                for (int sq = 8; sq < 56; ++sq)
+                {
+                    int lo = t.offset[c][sq], hi = lo + PawnPiece3Wide::KINDS * t.width[sq];
+                    if (idx >= lo && idx < hi)
+                    {
+                        int kind = (idx - lo) / t.width[sq] % 5;
+                        if (kind == 2 || kind == 4)
+                            features[k++] = idx;
+                        base = 1;
+                        break;
+                    }
+                }
+        }
+        return {k, inputs};
+    }
+};
+
+struct PawnKR3WideExtractor: IFeatureExtractor {
+    int inputs() const override { return PawnKR3Wide::INPUTS; }
+    int max_active_features() const override { return PawnKR3Wide::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PawnKR3Wide::fill_features_sparse(e, features, color);
+    }
+};
+
+struct PawnContacts {
+    static constexpr std::string_view NAME = "Pawn_Contacts";
+
+    static constexpr int INPUTS              = PawnAtkThreats::INPUTS;
+    static constexpr int MAX_ACTIVE_FEATURES = 64;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        auto  ksq = pos.kingSquare(color);
+        int   orient =
+          static_cast<int>(FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(ksq)]);
+        Bitboard occupied = pos.piecesBB();
+        int      k        = 0;
+        for (Color c : {Color::White, Color::Black})
+        {
+            int      rel   = static_cast<int>(c) ^ static_cast<int>(color);
+            Bitboard own   = pos.piecesBB(Piece(PieceType::Pawn, c));
+            Bitboard enemy = pos.piecesBB(Piece(PieceType::Pawn, !c));
+            for (Square t : bb::pawnAttacks(own, c) & ~occupied)
+                for (Square a : bb::pawnAttacks(Bitboard::square(t), c) & enemy)
+                    features[k++] = PawnAtkThreats::index(rel, static_cast<int>(t) ^ orient, 11,
+                                                          static_cast<int>(a) ^ orient);
+        }
+        return {k, INPUTS};
+    }
+};
+
+struct PawnContactsExtractor: IFeatureExtractor {
+    int inputs() const override { return PawnContacts::INPUTS; }
+    int max_active_features() const override { return PawnContacts::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PawnContacts::fill_features_sparse(e, features, color);
+    }
+};
+
 // The perspective's own passed pawns: no enemy pawn ahead on the same or an adjacent file.
 // Index: pawn square (ranks 2 to 7).
 struct Passed48 {
@@ -1357,6 +1441,10 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PawnPiece3WideExtractor>();
     if (name == "KingZone_Threats")
         return std::make_unique<KingZoneThreatsExtractor>();
+    if (name == "PawnKR_3Wide")
+        return std::make_unique<PawnKR3WideExtractor>();
+    if (name == "Pawn_Contacts")
+        return std::make_unique<PawnContactsExtractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;
