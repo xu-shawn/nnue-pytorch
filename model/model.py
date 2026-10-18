@@ -1,3 +1,5 @@
+import os
+
 import torch
 from torch import nn
 
@@ -29,6 +31,25 @@ class NNUEModel(nn.Module):
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
+
+        # Experiment: input features routed past the feature transformer into the outputs
+        # of the first layer-stack layer, like a material input (NNUE_L2_FEATURES, loader
+        # feature names joined by '+'). The loader appends their indices after the regular
+        # ones; they need no accumulator, since 32-wide rows are cheap to sum per evaluation.
+        l2_names = [n for n in os.environ.get("NNUE_L2_FEATURES", "").split("+") if n]
+        self.l2_input = None
+        if l2_names:
+            from .modules.features import _FEATURE_COMPONENTS
+
+            self.l2_offset = sum(f.NUM_INPUTS for f in self.input.features)
+            l2_dims = sum(_FEATURE_COMPONENTS[n].NUM_INPUTS for n in l2_names)
+            self.l2_input = nn.Linear(l2_dims, self.L2)
+            with torch.no_grad():
+                self.l2_input.weight.zero_()
+                self.l2_input.bias.zero_()
+            self.input_feature_name += "+" + "+".join(
+                _FEATURE_COMPONENTS[n].INPUT_FEATURE_NAME for n in l2_names
+            )
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
@@ -106,6 +127,22 @@ class NNUEModel(nn.Module):
     ):
         layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
 
+        extra = None
+        if self.l2_input is not None:
+            # Side-to-move view of the routed features, then drop them from the FT input
+            # (they are the last valid entries of each row, so the rows stay packed)
+            idx = torch.where(us.view(-1, 1) > 0.5, white_indices, black_indices).long()
+            rel = idx - self.l2_offset
+            rows, cols = torch.nonzero(rel >= 0, as_tuple=True)
+            extra = self.l2_input.bias.expand(idx.shape[0], -1).clone()
+            extra.index_add_(0, rows, self.l2_input.weight.t()[rel[rows, cols]])
+            white_indices = torch.where(
+                white_indices >= self.l2_offset, torch.full_like(white_indices, -1), white_indices
+            )
+            black_indices = torch.where(
+                black_indices >= self.l2_offset, torch.full_like(black_indices, -1), black_indices
+            )
+
         l0_ = self.forward_ft(
             us,
             them,
@@ -115,7 +152,7 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
         x = self.layer_stacks(
-            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights
+            l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights, extra
         )
 
         return x

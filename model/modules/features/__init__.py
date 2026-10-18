@@ -13,6 +13,7 @@ from .passed_48 import Passed48
 from .pawn_push import PawnPush
 from .pawnatk_threats import PawnAtkThreats
 from .pp_3wide import PP3Wide
+from .pp_wide2 import PPWide2
 from .promo_atk import PromoAtk
 from .promo_atk_sq import PromoAtkSq
 from .stop_atk import StopAtk
@@ -23,6 +24,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "K32Q2^": K32Q2,
     "Full_Threats": FullThreats,
     "PP_3Wide": PP3Wide,
+    "PP_Wide2": PPWide2,
     "Pawn_Push": PawnPush,
     "Promo_Atk": PromoAtk,
     "Promo_AtkSq": PromoAtkSq,

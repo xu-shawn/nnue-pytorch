@@ -200,6 +200,12 @@ class NNUE(nn.Module):
             },
         ]
 
+        if self.model.l2_input is not None:
+            train_params += [
+                {"params": [self.model.l2_input.weight], "lr": LRs[4], "weight_decay": dense_wd},
+                {"params": [self.model.l2_input.bias], "lr": LRs[5], "weight_decay": 0.0},
+            ]
+
         train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)

@@ -448,6 +448,61 @@ struct PP_3WideExtractor: IFeatureExtractor {
     }
 };
 
+// Pawn pairs two files apart (complementing PP_3Wide, which pairs pawns on the same or an
+// adjacent file), with PP_3Wide's pair index over all 96 pawn ids. At most 64 pairs are
+// active: the most is 8 pawns on each of two files two apart.
+struct PP_Wide2 {
+    static constexpr std::string_view NAME = "PP_Wide2";
+
+    static constexpr int INPUTS              = PP_3Wide::INPUTS;
+    static constexpr int MAX_ACTIVE_FEATURES = 64;
+
+    static constexpr std::uint64_t pair_mask(int sq) {
+        constexpr std::uint64_t FileA = 0x0101010101010101ULL;
+        constexpr std::uint64_t Rank1 = 0xFFULL;
+        constexpr std::uint64_t Rank8 = Rank1 << 56;
+
+        const int     f     = sq & 7;
+        std::uint64_t files = 0;
+        if (f > 1)
+            files |= FileA << (f - 2);
+        if (f < 6)
+            files |= FileA << (f + 2);
+        return files & ~Rank1 & ~Rank8;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos      = e.pos;
+        auto  allPawns = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
+        auto  ksq      = pos.kingSquare(color);
+        int   k        = 0;
+
+        for (Color c : {Color::White, Color::Black})
+            for (Square from : pos.piecesBB(Piece(PieceType::Pawn, c)))
+                for (Square to : Bitboard::fromBits(pair_mask(static_cast<int>(from))) & allPawns)
+                {
+                    if (from < to)
+                        continue;
+                    int index =
+                      PP_3Wide::make_index(color, c, from, to, pos.pieceAt(to).color(), ksq);
+                    if (index < INPUTS)
+                        features[k++] = index;
+                }
+
+        return {k, INPUTS};
+    }
+};
+
+struct PP_Wide2Extractor: IFeatureExtractor {
+    int inputs() const override { return PP_Wide2::INPUTS; }
+    int max_active_features() const override { return PP_Wide2::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PP_Wide2::fill_features_sparse(e, features, color);
+    }
+};
+
 // The features below share the orientation of Full_Threats and PP_3Wide: squares are
 // xor-ed with FullThreats::OrientTBL[perspective][ksq] and colors are relative to the
 // perspective.
@@ -1043,6 +1098,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<StopThreatsExtractor>();
     if (name == "PawnAtk_Threats")
         return std::make_unique<PawnAtkThreatsExtractor>();
+    if (name == "PP_Wide2")
+        return std::make_unique<PP_Wide2Extractor>();
     if (name == "Passed_48")
         return std::make_unique<Passed48Extractor>();
     return nullptr;

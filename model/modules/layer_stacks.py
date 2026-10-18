@@ -42,8 +42,11 @@ class LayerStacks(nn.Module):
         ls_indices: torch.Tensor,
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
+        extra: torch.Tensor | None = None,
     ):
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
+        if extra is not None:
+            l1c_ = l1c_ + extra
 
         # Extract the short-path skip connection before fake quantization
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)
