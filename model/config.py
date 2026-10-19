@@ -26,12 +26,19 @@ class ModelConfig(LayerStacksConfig):
             type=int,
             default=ModelConfig.L2,
         )
+        parser.add_argument(
+            "--ls-widths",
+            dest="ls_widths",
+            type=str,
+            default=ModelConfig.ls_widths,
+        )
 
     @staticmethod
     def get_model_config(args) -> "ModelConfig":
         config = ModelConfig()
         config.L1 = args.L1
         config.L2 = args.L2
+        config.ls_widths = args.ls_widths
         return config
 
     # Not omitting prefix on purpose.

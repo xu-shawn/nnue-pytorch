@@ -8,6 +8,23 @@ from .config import LayerStacksConfig
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
+def stack_l1_widths(count: int, L2: int, spec: str) -> list[int]:
+    """Number of l1 outputs of each layer stack, from LayerStacksConfig.ls_widths."""
+    widths = [L2] * count
+    entries = [part.split(":") for part in spec.split(",") if part.strip()]
+    for first, width in sorted((int(k), int(w)) for k, w in entries):
+        if not 0 <= first < count or not 2 <= width <= L2:
+            raise ValueError(f"bad ls-widths entry {first}:{width} (L2 = {L2})")
+        widths[first:] = [width] * (count - first)
+    return widths
+
+
+def l1_kept_outputs(L2: int, width: int) -> list[int]:
+    """The l1 outputs that a stack with `width` outputs keeps: the first width - 2 and the two
+    skip outputs at the end."""
+    return list(range(width - 2)) + [L2 - 2, L2 - 1]
+
+
 class LayerStacks(nn.Module):
     def __init__(
         self, count: int, config: LayerStacksConfig, quantization: QuantizationManager
@@ -36,6 +53,15 @@ class LayerStacks(nn.Module):
         with torch.no_grad():
             self.output.linear.bias.zero_()
 
+        # Narrower stacks (--ls-widths): the l1 outputs they do not have are zeroed here, and
+        # the serializer leaves them out.
+        self.l1_widths = stack_l1_widths(count, self.L2, config.ls_widths)
+        self.narrow_stacks = any(w != self.L2 for w in self.l1_widths)
+        l1_mask = torch.zeros(count, self.L2)
+        for i, width in enumerate(self.l1_widths):
+            l1_mask[i, l1_kept_outputs(self.L2, width)] = 1.0
+        self.register_buffer("l1_mask", l1_mask, persistent=False)
+
     def forward(
         self,
         x: torch.Tensor,
@@ -44,6 +70,8 @@ class LayerStacks(nn.Module):
         fake_quantize_weights: bool = True,
     ):
         l1c_ = self.l1(x, ls_indices, fake_quantize_weights)
+        if self.narrow_stacks:
+            l1c_ = l1c_ * self.l1_mask[ls_indices.view(-1).long()].to(l1c_.dtype)
 
         # Extract the short-path skip connection before fake quantization
         l1x_out = l1c_[:, -2].view(-1, 1) - l1c_[:, -1].view(-1, 1)

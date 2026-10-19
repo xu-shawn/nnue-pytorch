@@ -11,6 +11,7 @@ from torch import nn
 
 from ..config import ModelConfig
 from ..model import NNUEModel
+from ..modules.layer_stacks import l1_kept_outputs
 
 
 def ascii_hist(name, x, bins=7):
@@ -68,6 +69,37 @@ VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
+def narrow_indices(
+    L2: int, width: int, output_inputs: int
+) -> tuple[list[int], list[int], list[int]]:
+    """For a layer stack with `width` l1 outputs out of L2: the l1 rows it keeps, the l2 input
+    columns (squared, then clipped activations) and the output layer's input columns."""
+    rows = l1_kept_outputs(L2, width)
+    cols = rows + [L2 + i for i in rows]
+    out_cols = cols + list(range(2 * L2, output_inputs))
+    return rows, cols, out_cols
+
+
+@torch.no_grad()
+def narrow_layer_stack(
+    l1: nn.Linear, l2: nn.Linear, output: nn.Linear, L2: int, width: int
+) -> tuple[nn.Linear, nn.Linear, nn.Linear]:
+    """The layers of a stack with `width` l1 outputs, without the outputs it does not have."""
+    rows, cols, out_cols = narrow_indices(L2, width, output.in_features)
+
+    def linear(weight: torch.Tensor, bias: torch.Tensor) -> nn.Linear:
+        layer = nn.Linear(weight.shape[1], weight.shape[0])
+        layer.weight.copy_(weight)
+        layer.bias.copy_(bias)
+        return layer
+
+    return (
+        linear(l1.weight[rows], l1.bias[rows]),
+        linear(l2.weight[:, cols], l2.bias),
+        linear(output.weight[:, out_cols], output.bias),
+    )
+
+
 class NNUEWriter:
     """
     All values are stored in little endian.
@@ -97,7 +129,10 @@ class NNUEWriter:
         for bucket, (l1, l2, output) in enumerate(
             layer_stacks.get_coalesced_layer_stacks()
         ):
-            self.int32(fc_hash)  # FC layers hash
+            width = layer_stacks.l1_widths[bucket]
+            if width != model.L2:
+                l1, l2, output = narrow_layer_stack(l1, l2, output, model.L2, width)
+            self.int32(self.fc_hash(model, width))  # FC layers hash
             self.write_fc_layer(
                 model, l1, layer_stacks.l1.layer_key, f"bucket {bucket}"
             )
@@ -109,7 +144,8 @@ class NNUEWriter:
             )
 
     @staticmethod
-    def fc_hash(model: NNUEModel) -> int:
+    def fc_hash(model: NNUEModel, l1_width: int | None = None) -> int:
+        """Hash of a layer stack; l1_width overrides the number of l1 outputs (L2)."""
         # InputSlice hash
         prev_hash = 0xEC42E90D
         prev_hash ^= model.L1 * 2
@@ -120,12 +156,15 @@ class NNUEWriter:
             model.layer_stacks.l2.linear,
             model.layer_stacks.output.linear,
         ]
-        for layer in layers:
+        out_features = [layer.out_features // model.num_ls_buckets for layer in layers]
+        if l1_width is not None:
+            out_features[0] = l1_width
+        for num_outputs in out_features:
             layer_hash = 0xCC03DAE4
-            layer_hash += layer.out_features // model.num_ls_buckets
+            layer_hash += num_outputs
             layer_hash ^= prev_hash >> 1
             layer_hash ^= (prev_hash << 31) & 0xFFFFFFFF
-            if layer.out_features // model.num_ls_buckets != 1:
+            if num_outputs != 1:
                 # Clipped ReLU hash
                 layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
             prev_hash = layer_hash
@@ -242,14 +281,34 @@ class NNUEReader:
             for layer in layers
         ]
 
+        L2 = self.model.L2
         for b in range(num_ls_buckets):
-            self.read_int32(fc_hash)  # FC layers hash
-            for layer_idx in range(len(layers)):
-                self.read_fc_layer(
-                    l_w_slices[layer_idx][b],
-                    l_b_slices[layer_idx][b],
-                    layers[layer_idx].layer_key,
-                )
+            width = self.model.layer_stacks.l1_widths[b]
+            self.read_int32(NNUEWriter.fc_hash(self.model, width))  # FC layers hash
+            if width == L2:
+                for layer_idx in range(len(layers)):
+                    self.read_fc_layer(
+                        l_w_slices[layer_idx][b],
+                        l_b_slices[layer_idx][b],
+                        layers[layer_idx].layer_key,
+                    )
+                continue
+            # A narrower stack: read its layers, then place them in the full-width layers.
+            # The l1 outputs it does not have, and the weights reading them, stay zero.
+            (l1_w, l2_w, out_w) = (l_w_slices[i][b] for i in range(3))
+            (l1_b, l2_b, out_b) = (l_b_slices[i][b] for i in range(3))
+            rows, cols, out_cols = narrow_indices(L2, width, out_w.shape[1])
+            w1, b1 = torch.zeros(len(rows), l1_w.shape[1]), torch.zeros(len(rows))
+            w2 = torch.zeros(l2_w.shape[0], len(cols))
+            w3 = torch.zeros(1, len(out_cols))
+            self.read_fc_layer(w1, b1, layers[0].layer_key)
+            self.read_fc_layer(w2, l2_b, layers[1].layer_key)
+            self.read_fc_layer(w3, out_b, layers[2].layer_key)
+            for full in (l1_w, l1_b, l2_w, out_w):
+                full.zero_()
+            l1_w[rows], l1_b[rows] = w1, b1
+            l2_w[:, cols] = w2
+            out_w[:, out_cols] = w3
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
