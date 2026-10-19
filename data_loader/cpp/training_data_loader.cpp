@@ -1589,6 +1589,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PassStopThreatsGatedExtractor<4>>();
     if (name == "PassStop_Threats_N8")
         return std::make_unique<PassStopThreatsGatedExtractor<8>>();
+    if (name == "PassStop_Threats_N12")
+        return std::make_unique<PassStopThreatsGatedExtractor<12>>();
     if (name == "Ram_Pawn")
         return std::make_unique<SimpleExtractor<RamPawn>>();
     if (name == "Ram_PawnFile")

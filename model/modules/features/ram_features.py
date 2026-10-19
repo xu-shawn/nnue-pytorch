@@ -18,6 +18,14 @@ class PassStopThreatsN8(PassStopThreats):
     INPUT_FEATURE_NAME = "PassStop_Threats_N8"
 
 
+class PassStopThreatsN12(PassStopThreats):
+    """PassStop_Threats only with at most 12 knights, bishops, rooks and queens on the board."""
+
+    HASH = 0x7D29A4FA
+    FEATURE_NAME = "PassStop_Threats_N12"
+    INPUT_FEATURE_NAME = "PassStop_Threats_N12"
+
+
 class RamPawn(PP3Wide):
     """Every ram (a pawn blocked head-on by an enemy pawn) paired with every other pawn.
 

@@ -21,7 +21,7 @@ from .promo_atk import PromoAtk
 from .promo_atk_sq import PromoAtkSq
 from .stop_atk import StopAtk
 from .passstop_threats import PassStopThreats
-from .ram_features import PassStopThreatsN4, PassStopThreatsN8, RamPawn, RamPawnFile, RamRam
+from .ram_features import PassStopThreatsN4, PassStopThreatsN8, PassStopThreatsN12, RamPawn, RamPawnFile, RamRam
 from .stop_threats import StopThreats
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
@@ -38,6 +38,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "PassStop_Threats": PassStopThreats,
     "PassStop_Threats_N4": PassStopThreatsN4,
     "PassStop_Threats_N8": PassStopThreatsN8,
+    "PassStop_Threats_N12": PassStopThreatsN12,
     "Ram_Pawn": RamPawn,
     "Ram_PawnFile": RamPawnFile,
     "Ram_Ram": RamRam,
