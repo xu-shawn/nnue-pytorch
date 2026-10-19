@@ -1058,6 +1058,154 @@ struct PassStopThreatsExtractor: IFeatureExtractor {
     }
 };
 
+// PassStop_Threats only while at most N knights, bishops, rooks and queens of both colors are
+// left. In an engine the features then cost nothing in most of the game.
+template<int N>
+struct PassStopThreatsGated {
+    static constexpr int INPUTS              = PassStopThreats::INPUTS;
+    static constexpr int MAX_ACTIVE_FEATURES = PassStopThreats::MAX_ACTIVE_FEATURES;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos    = e.pos;
+        int   pieces = pos.piecesBB().count()
+                   - (pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn)).count() - 2;
+        if (pieces > N)
+            return {0, INPUTS};
+        return PassStopThreats::fill_features_sparse(e, features, color);
+    }
+};
+
+template<int N>
+struct PassStopThreatsGatedExtractor: IFeatureExtractor {
+    int inputs() const override { return PassStopThreatsGated<N>::INPUTS; }
+    int max_active_features() const override { return PassStopThreatsGated<N>::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return PassStopThreatsGated<N>::fill_features_sparse(e, features, color);
+    }
+};
+
+// Rams: a white pawn with a black pawn directly in front of it. From each perspective a ram is
+// identified by the oriented square of the lower of its two pawns (the perspective's own pawn),
+// on ranks 2 to 6: 40 ram ids. Orientation as in Full_Threats.
+struct Rams {
+    int           count = 0;
+    int           id[8];
+    std::uint64_t members[8];
+
+    Rams(const Position& pos, int orient) {
+        const std::uint64_t white = pos.piecesBB(whitePawn).bits(), black = pos.piecesBB(blackPawn).bits();
+        for (Square w : Bitboard::fromBits(white & (black >> 8)))
+        {
+            int a = static_cast<int>(w) ^ orient, b = (static_cast<int>(w) + 8) ^ orient;
+            id[count]      = std::min(a, b) - 8;
+            members[count] = (1ULL << static_cast<int>(w)) | (1ULL << (static_cast<int>(w) + 8));
+            ++count;
+        }
+    }
+};
+
+static int ram_orient(const Position& pos, Color color) {
+    return static_cast<int>(
+      FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+}
+
+// Every ram paired with every other pawn on the board. Index: ram id * 96 + other pawn (color
+// relative to the perspective * 48 + oriented square - 8). At most 8 rams with 14 other pawns.
+struct RamPawn {
+    static constexpr std::string_view NAME = "Ram_Pawn";
+
+    static constexpr int INPUTS              = 40 * 96;
+    static constexpr int MAX_ACTIVE_FEATURES = 8 * 14;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos    = e.pos;
+        const int  orient = ram_orient(pos, color);
+        const Rams rams(pos, orient);
+        int        k = 0;
+
+        for (int i = 0; i < rams.count; ++i)
+            for (Color c : {Color::White, Color::Black})
+            {
+                int rel = static_cast<int>(c) ^ static_cast<int>(color);
+                for (Square p : Bitboard::fromBits(pos.piecesBB(Piece(PieceType::Pawn, c)).bits()
+                                                   & ~rams.members[i]))
+                    features[k++] = rams.id[i] * 96 + rel * 48 + (static_cast<int>(p) ^ orient) - 8;
+            }
+
+        return {k, INPUTS};
+    }
+};
+
+// Every ram paired with the files that hold another pawn of each color. Index: ram id * 16 +
+// color relative to the perspective * 8 + oriented file. Pawn pushes leave these unchanged.
+struct RamPawnFile {
+    static constexpr std::string_view NAME = "Ram_PawnFile";
+
+    static constexpr int INPUTS              = 40 * 16;
+    static constexpr int MAX_ACTIVE_FEATURES = 8 * 16;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos    = e.pos;
+        const int  orient = ram_orient(pos, color);
+        const Rams rams(pos, orient);
+        int        k = 0;
+
+        for (int i = 0; i < rams.count; ++i)
+        {
+            unsigned files = 0;
+            for (Color c : {Color::White, Color::Black})
+            {
+                int rel = static_cast<int>(c) ^ static_cast<int>(color);
+                for (Square p : Bitboard::fromBits(pos.piecesBB(Piece(PieceType::Pawn, c)).bits()
+                                                   & ~rams.members[i]))
+                    files |= 1u << (rel * 8 + ((static_cast<int>(p) ^ orient) & 7));
+            }
+            for (int b = 0; b < 16; ++b)
+                if (files & (1u << b))
+                    features[k++] = rams.id[i] * 16 + b;
+        }
+
+        return {k, INPUTS};
+    }
+};
+
+// Every pair of rams on the board, by both ram ids (triangular index). These change only when
+// a ram forms or breaks.
+struct RamRam {
+    static constexpr std::string_view NAME = "Ram_Ram";
+
+    static constexpr int INPUTS              = 40 * 39 / 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 8 * 7 / 2;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos = e.pos;
+        const Rams rams(pos, ram_orient(pos, color));
+        int        k = 0;
+
+        for (int i = 0; i < rams.count; ++i)
+            for (int j = 0; j < rams.count; ++j)
+                if (rams.id[i] < rams.id[j])
+                    features[k++] = rams.id[j] * (rams.id[j] - 1) / 2 + rams.id[i];
+
+        return {k, INPUTS};
+    }
+};
+
+template<typename T>
+struct SimpleExtractor: IFeatureExtractor {
+    int inputs() const override { return T::INPUTS; }
+    int max_active_features() const override { return T::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return T::fill_features_sparse(e, features, color);
+    }
+};
+
 // Pawn-piece pairs: every knight, bishop, rook, queen or king on the same or an adjacent file
 // as a pawn, at any rank. Index: pawn (colour relative to the perspective, oriented square),
 // piece kind (colour relative to the perspective, type) and the piece's square within the
@@ -1437,6 +1585,16 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PP_Wide2Extractor>();
     if (name == "PassStop_Threats")
         return std::make_unique<PassStopThreatsExtractor>();
+    if (name == "PassStop_Threats_N4")
+        return std::make_unique<PassStopThreatsGatedExtractor<4>>();
+    if (name == "PassStop_Threats_N8")
+        return std::make_unique<PassStopThreatsGatedExtractor<8>>();
+    if (name == "Ram_Pawn")
+        return std::make_unique<SimpleExtractor<RamPawn>>();
+    if (name == "Ram_PawnFile")
+        return std::make_unique<SimpleExtractor<RamPawnFile>>();
+    if (name == "Ram_Ram")
+        return std::make_unique<SimpleExtractor<RamRam>>();
     if (name == "PawnPiece_3Wide")
         return std::make_unique<PawnPiece3WideExtractor>();
     if (name == "KingZone_Threats")
