@@ -141,6 +141,59 @@ struct K32Q2Extractor: IFeatureExtractor {
     }
 };
 
+// K32Q2 with 4 piece-count buckets as a further bucket dimension, the most significant part of
+// the bucket: pc_bucket = (pieces - 1) / 8.
+struct K32Q2P4 {
+    static constexpr std::string_view NAME = "K32Q2P4";
+
+    static constexpr int NUM_SQ              = 64;
+    static constexpr int NUM_PT              = 12;
+    static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
+    static constexpr int NUM_KING_BUCKETS    = NUM_SQ / 2;
+    static constexpr int NUM_PC_BUCKETS      = 4;
+    static constexpr int NUM_BUCKETS         = NUM_KING_BUCKETS * 2 * NUM_PC_BUCKETS;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS;
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static int
+    feature_index(Color color, Square ksq, int pc_bucket, bool opp_queen, Square sq, Piece p) {
+        Square o_ksq  = orient_flip_2(color, ksq, ksq);
+        auto   p_idx  = static_cast<int>(p.type()) * 2 + (p.color() != color);
+        int    bucket = pc_bucket * NUM_KING_BUCKETS * 2
+                      + K32Q2::KingBuckets[static_cast<int>(o_ksq)] * 2 + (opp_queen ? 1 : 0);
+        return static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+             + bucket * NUM_PLANES;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos       = e.pos;
+        auto  pieces    = pos.piecesBB();
+        auto  ksq       = pos.kingSquare(color);
+        int   pc_bucket = (static_cast<int>(pieces.count()) - 1) / 8;
+        bool  opp_queen = pos.piecesBB(Piece(PieceType::Queen, !color)).any();
+
+        int j = 0;
+        for (Square sq : pieces)
+        {
+            auto p      = pos.pieceAt(sq);
+            features[j] = feature_index(color, ksq, pc_bucket, opp_queen, sq, p);
+            ++j;
+        }
+        return {j, INPUTS};
+    }
+};
+
+struct K32Q2P4Extractor: IFeatureExtractor {
+    int inputs() const override { return K32Q2P4::INPUTS; }
+    int max_active_features() const override { return K32Q2P4::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
+                                             int*                     features,
+                                             Color                    color) const override {
+        return K32Q2P4::fill_features_sparse(e, features, color);
+    }
+};
+
 // Pawn attackers no longer target pawns; those relationships are represented by PP_3Wide.
 constexpr int numvalidtargets[6] = {4, 10, 8, 8, 10, 0};
 
@@ -489,6 +542,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<HalfKAv2_hmExtractor>();
     if (name == "K32Q2")
         return std::make_unique<K32Q2Extractor>();
+    if (name == "K32Q2P4")
+        return std::make_unique<K32Q2P4Extractor>();
     if (name == "Full_Threats")
         return std::make_unique<FullThreatsExtractor>();
     if (name == "PP_3Wide")
