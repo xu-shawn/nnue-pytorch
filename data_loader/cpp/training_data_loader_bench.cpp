@@ -65,6 +65,8 @@ const CliConfig default_cli_config = {
       .ply_y3                  = 0.20,
       .ply_x4                  = 29.5,
       .ply_y4                  = 0.80,
+      .wld_model_scale         = 1.5,
+      .wld_min_prob            = 0.0,
     },
   .ddp_config = {.rank = 0, .world_size = 1},
   .hll_config = {.initial_hll = nullptr, .initial_hll_size = 0, .initial_total = 0},
@@ -179,6 +181,9 @@ CliConfig build_config_from_map(const std::map<std::string, std::string>& m) {
                 .ply_y3                  = std::stod(m.at("ply_y3")),
                 .ply_x4                  = std::stod(m.at("ply_x4")),
                 .ply_y4                  = std::stod(m.at("ply_y4")),
+                .wld_model_scale =
+                  m.count("wld_model_scale") ? std::stod(m.at("wld_model_scale")) : 1.5,
+                .wld_min_prob = m.count("wld_min_prob") ? std::stod(m.at("wld_min_prob")) : 0.0,
               },
             .ddp_config = {.rank       = std::stoi(m.at("ddp_config.rank")),
                            .world_size = std::stoi(m.at("ddp_config.world_size"))},

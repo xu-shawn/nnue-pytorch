@@ -65,7 +65,8 @@ namespace binpack {
 
         // The win rate model returns the probability (per mille) of winning given an eval
         // and a game-ply. The model fits rather accurately the LTC fishtest statistics.
-        std::tuple<double, double, double> win_rate_model() const {
+        // b_scale widens the logistic (1.0 is the fitted model).
+        std::tuple<double, double, double> win_rate_model(double b_scale = 1.5) const {
 
            // The model captures only up to 240 plies, so limit input (and rescale)
            double m = std::min(240, int(ply)) / 64.0;
@@ -79,8 +80,8 @@ namespace binpack {
            double b = (((bs[0] * m + bs[1]) * m + bs[2]) * m) + bs[3];
 
            // tweak wdl model, deviating from fishtest results,
-           // but yielding improved training results
-           b *= 1.5;
+           // but yielding improved training results (default 1.5)
+           b *= b_scale;
 
            // Transform eval to centipawns with limited range
            double x = std::clamp(double(100 * score) / 208, -2000.0, 2000.0);
@@ -93,8 +94,8 @@ namespace binpack {
         }
 
         // how likely is end-game result with the current score?
-        double score_result_prob() const {
-           auto [w, l, d] = win_rate_model();
+        double score_result_prob(double b_scale = 1.5) const {
+           auto [w, l, d] = win_rate_model(b_scale);
            if (result > 0)
                return w;
            if (result < 0)

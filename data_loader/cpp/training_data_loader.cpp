@@ -1046,10 +1046,19 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
         if (config.wld_filtered)
         {
-            uint64_t wld_skip_threshold =
-              static_cast<uint64_t>((1.0 - e.score_result_prob()) * static_cast<double>(~0ULL));
-            if (prng() < wld_skip_threshold)
-                return true;
+            const double result_prob = e.score_result_prob(config.wld_model_scale);
+            if (config.wld_min_prob > 0.0)
+            {
+                if (result_prob < config.wld_min_prob)
+                    return true;
+            }
+            else
+            {
+                uint64_t wld_skip_threshold =
+                  static_cast<uint64_t>((1.0 - result_prob) * static_cast<double>(~0ULL));
+                if (prng() < wld_skip_threshold)
+                    return true;
+            }
         }
 
         if (config.simple_eval_skipping > 0

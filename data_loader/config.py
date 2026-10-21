@@ -44,6 +44,13 @@ class DataloaderSkipConfig:
     """Ply soft filter control point x4."""
     ply_y4: float = 0.75
     """Ply soft filter control point y4."""
+    wld_model_scale: float = 1.5
+    """Scale of the width of the win rate model used for WLD-based skipping. 1.0 is the model as
+    fitted to fishtest data, larger values make it flatter (default=1.5)."""
+    wld_min_prob: float = 0.0
+    """If > 0, WLD-based skipping is deterministic: positions whose game result has a model
+    probability below this value are skipped and all others are kept. 0 = skip each position with
+    probability 1 - P(result) (default=0.0)."""
 
 
 @dataclass
@@ -124,6 +131,8 @@ class CDataloaderSkipConfig(ctypes.Structure):
         ("ply_y3", ctypes.c_double),
         ("ply_x4", ctypes.c_double),
         ("ply_y4", ctypes.c_double),
+        ("wld_model_scale", ctypes.c_double),
+        ("wld_min_prob", ctypes.c_double),
     ]
 
     def __init__(self, config: DataloaderSkipConfig):
@@ -148,6 +157,8 @@ class CDataloaderSkipConfig(ctypes.Structure):
             ply_y3=config.ply_y3,
             ply_x4=config.ply_x4,
             ply_y4=config.ply_y4,
+            wld_model_scale=config.wld_model_scale,
+            wld_min_prob=config.wld_min_prob,
         )
 
 
