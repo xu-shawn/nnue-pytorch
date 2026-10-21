@@ -141,19 +141,26 @@ struct K32Q2Extractor: IFeatureExtractor {
     }
 };
 
-// K32Q2 with 4 piece-count buckets as a further bucket dimension, the most significant part of
-// the bucket: pc_bucket = (pieces - 1) / 8.
-struct K32Q2P4 {
-    static constexpr std::string_view NAME = "K32Q2P4";
+// K32Q2 with piece-count buckets as a further bucket dimension, the most significant part of
+// the bucket. K32Q2P4: pc_bucket = (pieces - 1) / 8. K32Q2P2: pc_bucket = pieces > 16.
+template<int NumPcBuckets>
+struct K32Q2Pc {
+    static_assert(NumPcBuckets == 2 || NumPcBuckets == 4);
+
+    static constexpr std::string_view NAME = NumPcBuckets == 4 ? "K32Q2P4" : "K32Q2P2";
 
     static constexpr int NUM_SQ              = 64;
     static constexpr int NUM_PT              = 12;
     static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
     static constexpr int NUM_KING_BUCKETS    = NUM_SQ / 2;
-    static constexpr int NUM_PC_BUCKETS      = 4;
+    static constexpr int NUM_PC_BUCKETS      = NumPcBuckets;
     static constexpr int NUM_BUCKETS         = NUM_KING_BUCKETS * 2 * NUM_PC_BUCKETS;
     static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS;
     static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static int piece_count_bucket(int pieces) {
+        return NumPcBuckets == 4 ? (pieces - 1) / 8 : pieces > 16;
+    }
 
     static int
     feature_index(Color color, Square ksq, int pc_bucket, bool opp_queen, Square sq, Piece p) {
@@ -170,7 +177,7 @@ struct K32Q2P4 {
         auto& pos       = e.pos;
         auto  pieces    = pos.piecesBB();
         auto  ksq       = pos.kingSquare(color);
-        int   pc_bucket = (static_cast<int>(pieces.count()) - 1) / 8;
+        int   pc_bucket = piece_count_bucket(static_cast<int>(pieces.count()));
         bool  opp_queen = pos.piecesBB(Piece(PieceType::Queen, !color)).any();
 
         int j = 0;
@@ -184,13 +191,17 @@ struct K32Q2P4 {
     }
 };
 
-struct K32Q2P4Extractor: IFeatureExtractor {
-    int inputs() const override { return K32Q2P4::INPUTS; }
-    int max_active_features() const override { return K32Q2P4::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int> fill_features_sparse(const TrainingDataEntry& e,
-                                             int*                     features,
-                                             Color                    color) const override {
-        return K32Q2P4::fill_features_sparse(e, features, color);
+using K32Q2P4 = K32Q2Pc<4>;
+using K32Q2P2 = K32Q2Pc<2>;
+
+template<int NumPcBuckets>
+struct K32Q2PcExtractor: IFeatureExtractor {
+    using Feature = K32Q2Pc<NumPcBuckets>;
+    int inputs() const override { return Feature::INPUTS; }
+    int max_active_features() const override { return Feature::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return Feature::fill_features_sparse(e, features, color);
     }
 };
 
@@ -543,7 +554,9 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
     if (name == "K32Q2")
         return std::make_unique<K32Q2Extractor>();
     if (name == "K32Q2P4")
-        return std::make_unique<K32Q2P4Extractor>();
+        return std::make_unique<K32Q2PcExtractor<4>>();
+    if (name == "K32Q2P2")
+        return std::make_unique<K32Q2PcExtractor<2>>();
     if (name == "Full_Threats")
         return std::make_unique<FullThreatsExtractor>();
     if (name == "PP_3Wide")
