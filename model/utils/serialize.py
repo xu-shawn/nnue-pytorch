@@ -68,6 +68,10 @@ VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
+# Hash base of the factorised l1's dense mix layer (engine: Layers::AffineTransformMix)
+MIX_HASH = 0x5A3C9E17
+
+
 class NNUEWriter:
     """
     All values are stored in little endian.
@@ -94,6 +98,11 @@ class NNUEWriter:
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model)
         layer_stacks = model.layer_stacks
+        mixes = (
+            list(layer_stacks.get_coalesced_mix())
+            if layer_stacks.l1mix is not None
+            else []
+        )
         for bucket, (l1, l2, output) in enumerate(
             layer_stacks.get_coalesced_layer_stacks()
         ):
@@ -101,6 +110,8 @@ class NNUEWriter:
             self.write_fc_layer(
                 model, l1, layer_stacks.l1.layer_key, f"bucket {bucket}"
             )
+            if layer_stacks.l1mix is not None:
+                self.write_mix_layer(model, mixes[bucket], f"bucket {bucket}")
             self.write_fc_layer(
                 model, l2, layer_stacks.l2.layer_key, f"bucket {bucket}"
             )
@@ -114,18 +125,23 @@ class NNUEWriter:
         prev_hash = 0xEC42E90D
         prev_hash ^= model.L1 * 2
 
-        # Fully connected layers
+        # Fully connected layers: (layer hash base, outputs, followed by a clipped ReLU)
+        ls = model.layer_stacks
+        n = model.num_ls_buckets
         layers = [
-            model.layer_stacks.l1.linear,
-            model.layer_stacks.l2.linear,
-            model.layer_stacks.output.linear,
+            (0xCC03DAE4, ls.l1.linear.out_features // n, ls.l1mix is None),
+            (0xCC03DAE4, ls.l2.linear.out_features // n, True),
+            (0xCC03DAE4, ls.output.linear.out_features // n, False),
         ]
-        for layer in layers:
-            layer_hash = 0xCC03DAE4
-            layer_hash += layer.out_features // model.num_ls_buckets
+        if ls.l1mix is not None:
+            # factorised l1: sparse layer (no activation), then the dense int16 mix
+            layers.insert(1, (MIX_HASH, ls.l1mix.linear.out_features // n, True))
+        for base, outputs, relu in layers:
+            layer_hash = base
+            layer_hash += outputs
             layer_hash ^= prev_hash >> 1
             layer_hash ^= (prev_hash << 31) & 0xFFFFFFFF
-            if layer.out_features // model.num_ls_buckets != 1:
+            if relu:
                 # Clipped ReLU hash
                 layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
             prev_hash = layer_hash
@@ -202,6 +218,16 @@ class NNUEWriter:
         # Weights stored as [outputs][inputs], so we can flatten
         self.write_tensor(weight)
 
+    def write_mix_layer(self, model: NNUEModel, layer: nn.Linear, desc: str) -> None:
+        # int32 biases, then int16 weights stored as [outputs][inputs] (no padding)
+        bias, weight = model.quantization.quantize_mix_layer(
+            layer.bias.data,
+            layer.weight.data,
+            get_histogram_callback(desc, self.verbose),
+        )
+        self.write_tensor(bias)
+        self.write_tensor(weight)
+
     def int32(self, v: int) -> None:
         self.buf.extend(struct.pack("<I", v))
 
@@ -242,6 +268,11 @@ class NNUEReader:
             for layer in layers
         ]
 
+        mix = self.model.layer_stacks.l1mix
+        if mix is not None:
+            mix_w = torch.chunk(mix.linear.weight.data, num_ls_buckets, dim=0)
+            mix_b = torch.chunk(mix.linear.bias.data, num_ls_buckets, dim=0)
+
         for b in range(num_ls_buckets):
             self.read_int32(fc_hash)  # FC layers hash
             for layer_idx in range(len(layers)):
@@ -250,6 +281,8 @@ class NNUEReader:
                     l_b_slices[layer_idx][b],
                     layers[layer_idx].layer_key,
                 )
+                if layer_idx == 0 and mix is not None:
+                    self.read_mix_layer(mix_w[b], mix_b[b])
 
     def read_header(self, feature_hash: int, fc_hash: int) -> None:
         self.read_int32(VERSION)  # version
@@ -315,6 +348,15 @@ class NNUEReader:
 
         layer_bias_t.data.copy_(layer_bias)
         layer_weight_t.data.copy_(layer_weight)
+
+    def read_mix_layer(
+        self, layer_weight_t: torch.Tensor, layer_bias_t: torch.Tensor
+    ) -> None:
+        bias = self.tensor(np.int32, layer_bias_t.shape)
+        weight = self.tensor(np.int16, layer_weight_t.shape)
+        q = self.model.quantization.weight_scales_dict
+        layer_bias_t.data.copy_(bias / q["ls_mix_bias"])
+        layer_weight_t.data.copy_(weight / q["ls_mix_weight"])
 
     def read_int32(self, expected: int | None = None) -> int:
         v = struct.unpack("<I", self.f.read(4))[0]

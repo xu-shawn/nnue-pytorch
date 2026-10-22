@@ -346,7 +346,9 @@ def init_random_weights(model: M.NNUEModel) -> None:
             model.layer_stacks.l1,
             model.layer_stacks.l2,
             model.layer_stacks.output,
-        ]:
+        ] + (
+            [model.layer_stacks.l1mix] if model.layer_stacks.l1mix is not None else []
+        ):
             if (
                 hasattr(ls, "linear")
                 and hasattr(ls.linear, "bias")

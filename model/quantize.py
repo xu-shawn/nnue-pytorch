@@ -9,6 +9,11 @@ if TYPE_CHECKING:
 
 FAKE_QUANTIZE_EPS = 1e-5
 
+# Factorised l1 mix (--l2-rank): weights are int16 at this scale. |w| <= MIX_WEIGHT_MAX keeps
+# the engine's int32 sums of up to 32 products (int16 inputs) from overflowing.
+MIX_WEIGHT_SCALE = 512.0
+MIX_WEIGHT_MAX = 1019.0
+
 
 class WeightClippingConfig(TypedDict):
     params: list[torch.Tensor]
@@ -119,7 +124,16 @@ class QuantizationManager:
             "ls_l2_bias": self.weight_scale_hidden[1] * self.hidden_quantized_one,
             "ls_output_weight": self.weight_scale_hidden[2],
             "ls_output_bias": self.weight_scale_hidden[2] * self.hidden_quantized_one,
+            # factorised l1 (--l2-rank): int16 mix weights, int32 biases in the l1 output scale
+            "ls_mix_weight": MIX_WEIGHT_SCALE,
+            "ls_mix_bias": self.weight_scale_hidden[0] * self.hidden_quantized_one,
         }
+        # The engine feeds the sparse layer's int32 outputs to the mix as int16 after >> 1,
+        # so the mix input saturates at +-32767 * 2 in the l1 output scale.
+        self.max_mix_input = (
+            32767.0 * 2 / (self.weight_scale_hidden[0] * self.hidden_quantized_one)
+        )
+        self.max_mix_weight = MIX_WEIGHT_MAX / MIX_WEIGHT_SCALE
 
     def get_ft_weight_bounds(self, dtype: torch.dtype) -> tuple[float, float]:
         info = torch.iinfo(dtype)
@@ -183,7 +197,17 @@ class QuantizationManager:
                 "min_weight": -self.max_hidden_weight[2],
                 "max_weight": self.max_hidden_weight[2],
             },
-        ]
+        ] + (
+            [
+                {
+                    "params": [model.layer_stacks.l1mix.linear.weight],
+                    "min_weight": -self.max_mix_weight,
+                    "max_weight": self.max_mix_weight,
+                }
+            ]
+            if model.layer_stacks.l1mix is not None
+            else []
+        )
 
     def quantize_feature_transformer_weights(
         self,
@@ -240,6 +264,26 @@ class QuantizationManager:
         if callback is not None:
             callback(bias_key, bias)
             callback(weight_key, weight)
+
+        return bias, weight
+
+    def quantize_mix_layer(
+        self,
+        bias: torch.Tensor,
+        weight: torch.Tensor,
+        callback: Callable | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        bias = _safe_convert(
+            bias.mul(self.weight_scales_dict["ls_mix_bias"]), torch.int32
+        )
+        weight = weight.mul(self.weight_scales_dict["ls_mix_weight"]).round()
+        if weight.abs().max() > MIX_WEIGHT_MAX:
+            raise RuntimeError(f"mix weight out of range: {weight.abs().max().item()}")
+        weight = _safe_convert(weight, torch.int16)
+
+        if callback is not None:
+            callback("ls_mix_bias", bias)
+            callback("ls_mix_weight", weight)
 
         return bias, weight
 

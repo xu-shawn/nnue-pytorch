@@ -26,12 +26,19 @@ class ModelConfig(LayerStacksConfig):
             type=int,
             default=ModelConfig.L2,
         )
+        parser.add_argument(
+            "--l2-rank",
+            dest="L2R",
+            type=int,
+            default=ModelConfig.L2R,
+        )
 
     @staticmethod
     def get_model_config(args) -> "ModelConfig":
         config = ModelConfig()
         config.L1 = args.L1
         config.L2 = args.L2
+        config.L2R = args.L2R
         return config
 
     # Not omitting prefix on purpose.
