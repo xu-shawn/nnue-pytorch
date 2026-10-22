@@ -146,6 +146,9 @@ class NNUEWriter:
         layer = model.input
 
         bias = layer.bias.data[: model.L1]
+        if model.mat_ft is not None:
+            # Both kings are always on the board: their material rows are part of the bias
+            bias = bias + model.mat_ft.data[10] + model.mat_ft.data[11]
 
         # Get export weights (coalesced + remapped 12→11 piece types)
         weight = layer.get_export_weights()
@@ -171,6 +174,17 @@ class NNUEWriter:
             offset += n
 
             self.write_tensor(segment_weight)
+
+        if model.mat_ft is not None:
+            # Material rows for own / opponent P, N, B, R, Q (planes 0-9), int16 like the
+            # biases, [plane][outputs]
+            self.write_tensor(
+                model.quantization.quantize_feature_transformer_weights(
+                    model.mat_ft.data[:10],
+                    torch.int16,
+                    get_histogram_callback("material rows", self.verbose),
+                )
+            )
 
     def write_fc_layer(
         self,
@@ -289,6 +303,15 @@ class NNUEReader:
 
         layer.bias.data = bias.to(torch.float32)
         layer.load_export_weights(weight.to(torch.float32))
+
+        if self.model.mat_ft is not None:
+            mat = self.tensor(np.int16, [10, L1])
+            _, mat = self.model.quantization.dequantize_feature_transformer(
+                torch.zeros(1), mat
+            )
+            # The kings' rows were folded into the bias on export
+            self.model.mat_ft.data.zero_()
+            self.model.mat_ft.data[:10] = mat.to(torch.float32)
 
     def read_fc_layer(
         self,

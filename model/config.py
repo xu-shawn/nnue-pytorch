@@ -26,12 +26,19 @@ class ModelConfig(LayerStacksConfig):
             type=int,
             default=ModelConfig.L2,
         )
+        parser.add_argument(
+            "--material-rows",
+            dest="material_rows",
+            action="store_true",
+            default=ModelConfig.material_rows,
+        )
 
     @staticmethod
     def get_model_config(args) -> "ModelConfig":
         config = ModelConfig()
         config.L1 = args.L1
         config.L2 = args.L2
+        config.material_rows = args.material_rows
         return config
 
     # Not omitting prefix on purpose.

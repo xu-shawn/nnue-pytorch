@@ -332,6 +332,10 @@ def init_random_weights(model: M.NNUEModel) -> None:
         model.input.bias.data.uniform_(-1.0, 1.0)
         touched.add(id(model.input.bias))
 
+        if model.mat_ft is not None:
+            model.mat_ft.data.uniform_(-1.0, 1.0)
+            touched.add(id(model.mat_ft))
+
         for group in model.weight_clipping:
             min_w = group["min_weight"]
             max_w = group["max_weight"]

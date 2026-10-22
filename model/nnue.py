@@ -200,6 +200,12 @@ class NNUE(nn.Module):
             },
         ]
 
+        # Material rows (--material-rows): like FT weights, no weight decay
+        if self.model.mat_ft is not None:
+            train_params.append(
+                {"params": [self.model.mat_ft], "lr": LRs[0], "weight_decay": 0.0}
+            )
+
         train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)

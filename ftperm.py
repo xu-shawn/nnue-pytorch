@@ -579,6 +579,8 @@ def ft_permute_impl(model: NNUEModel, perm: npt.NDArray[np.int_]) -> None:
     for f in model.input.features:
         f.weight.copy_(f.weight[:, permutation])
     model.input.bias.copy_(model.input.bias[permutation])
+    if model.mat_ft is not None:
+        model.mat_ft.copy_(model.mat_ft[:, permutation])
     model.layer_stacks.l1.linear.weight.copy_(
         model.layer_stacks.l1.linear.weight[:, permutation]
     )
