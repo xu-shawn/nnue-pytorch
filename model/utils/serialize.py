@@ -129,6 +129,9 @@ class NNUEWriter:
                 # Clipped ReLU hash
                 layer_hash = (layer_hash + 0x538D24C7) & 0xFFFFFFFF
             prev_hash = layer_hash
+        if model.ls_class_max:
+            # Material-class layer stacks: same layers, different stack selection
+            layer_hash ^= 0xC1A55000 + model.ls_class_max
         return layer_hash
 
     def write_header(self, model: NNUEModel, fc_hash: int, description: str) -> None:

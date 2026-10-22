@@ -30,6 +30,19 @@ class NNUEModel(nn.Module):
         self.feature_hash = self.input.HASH
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
+        # Material-class layer stacks (--ls-class-max): piece-type counts are read from the
+        # piece-square indices (feature with a 768-input virtual factor: bucket * 768 +
+        # plane * 64 + square, planes own/opponent P, N, B, R, Q, K)
+        self.ls_class_max = config.ls_class_max
+        assert self.ls_class_max % 4 == 0
+        self.psq_offset, self.psq_span = 0, 0
+        for f in self.input.features:
+            if getattr(f, "NUM_INPUTS_VIRTUAL", 0) == 768:
+                self.psq_span = f.NUM_INPUTS
+                break
+            self.psq_offset += f.NUM_INPUTS
+        assert not self.ls_class_max or self.psq_span, "--ls-class-max needs K32Q2"
+
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
         self.input.init_weights()
@@ -89,8 +102,38 @@ class NNUEModel(nn.Module):
             fake_quantize_weights,
         )
 
-    def calculate_buckets(self, piece_count: torch.Tensor, queen_bucket: torch.Tensor):
+    def material_class(self, indices: torch.Tensor) -> torch.Tensor:
+        """3 if any queen is on the board, else 2 if any rook, else 1 if any minor piece,
+        else 0 (pawns only), from one perspective's piece-square indices."""
+        rel = indices.long() - self.psq_offset
+        is_psq = (indices >= 0) & (rel >= 0) & (rel < self.psq_span)
+        plane = torch.where(is_psq, (rel % 768) // 64, torch.full_like(rel, 12))
+        counts = torch.zeros(indices.shape[0], 13, device=indices.device)
+        counts.scatter_add_(1, plane, torch.ones_like(plane, dtype=counts.dtype))
+        q = counts[:, 8] + counts[:, 9]
+        r = counts[:, 6] + counts[:, 7]
+        m = counts[:, 2:6].sum(1)
+        return torch.where(q > 0, 3, torch.where(r > 0, 2, torch.where(m > 0, 1, 0)))
+
+    def calculate_buckets(
+        self,
+        piece_count: torch.Tensor,
+        queen_bucket: torch.Tensor,
+        indices: torch.Tensor | None = None,
+    ):
         pc_bucket = (piece_count - 1) // 4
+        if self.ls_class_max:
+            assert indices is not None
+            cls = (
+                self.material_class(indices)
+                .to(queen_bucket.dtype)
+                .view_as(queen_bucket)
+            )
+            queen_bucket = torch.where(
+                piece_count.view_as(queen_bucket) <= self.ls_class_max,
+                cls,
+                queen_bucket,
+            )
         return pc_bucket * 4 + queen_bucket
 
     def forward(
@@ -104,7 +147,9 @@ class NNUEModel(nn.Module):
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
     ):
-        layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
+        layer_stack_indices = self.calculate_buckets(
+            piece_count, queen_bucket, white_indices if self.ls_class_max else None
+        )
 
         l0_ = self.forward_ft(
             us,
