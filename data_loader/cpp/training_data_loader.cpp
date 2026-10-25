@@ -367,7 +367,7 @@ struct PP_3Wide {
 
     static constexpr int PAWN_IDS            = 2 * 48;
     static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int MAX_ACTIVE_FEATURES = 72;
 
     static int make_pawn_id(Color color, Square square) {
         return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
@@ -443,6 +443,172 @@ struct PP_3WideExtractor: IFeatureExtractor {
     }
 };
 
+template<typename T>
+struct SimpleExtractor: IFeatureExtractor {
+    int inputs() const override { return T::INPUTS; }
+    int max_active_features() const override { return T::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return T::fill_features_sparse(e, features, color);
+    }
+};
+
+// Knights, bishops, rooks and queens on the board
+static int officer_count(const Position& pos) {
+    int n = 0;
+    for (Color c : {Color::White, Color::Black})
+        for (PieceType pt : {PieceType::Knight, PieceType::Bishop, PieceType::Rook, PieceType::Queen})
+            n += pos.piecesBB(Piece(pt, c)).count();
+    return n;
+}
+
+// Orientation of a perspective's frame as in Full_Threats (horizontal mirror by the king's file,
+// vertical flip for black)
+static int perspective_orient(const Position& pos, Color color) {
+    return static_cast<int>(
+      FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+}
+
+// XRay_Threats_N4: every bishop, rook or queen (either colour) whose line, past exactly one piece
+// (the blocker), reaches a second piece (the target), while at most four knights, bishops, rooks and
+// queens are on the board (else empty). Covers pins, skewers, discovered attacks and batteries, which
+// Full_Threats (direct attacks only) does not. Index, oriented frame of Full_Threats: offset of the
+// attacker kind (colour rel. the perspective * 3 + type - bishop) + (pair index of the attacker square
+// and target square among that type's lines at distance >= 2) * 24 + (target colour rel. the
+// perspective * 6 + target type) * 2 + (blocker colour differs from the attacker's). 99456 inputs.
+struct XRayTable {
+    int pair[3][64][64];
+    int count[3] = {0, 0, 0};
+    int offset[6];
+
+    XRayTable() {
+        for (int ti = 0; ti < 3; ++ti)
+            for (int a = 0; a < 64; ++a)
+                for (int b = 0; b < 64; ++b)
+                {
+                    pair[ti][a][b] = -1;
+                    const int  df   = (b & 7) - (a & 7), dr = (b >> 3) - (a >> 3);
+                    const bool diag = df != 0 && std::abs(df) == std::abs(dr);
+                    const bool orth = (df == 0) != (dr == 0);
+                    const bool ok   = ti == 0 ? diag : ti == 1 ? orth : (diag || orth);
+                    if (ok && std::max(std::abs(df), std::abs(dr)) >= 2)
+                        pair[ti][a][b] = count[ti]++;
+                }
+        int off = 0;
+        for (int kind = 0; kind < 6; ++kind)
+        {
+            offset[kind] = off;
+            off += count[kind % 3] * 24;
+        }
+    }
+};
+
+static const XRayTable& xray_table() {
+    static const XRayTable t;
+    return t;
+}
+
+struct XRayThreatsN4 {
+    static constexpr std::string_view NAME = "XRay_Threats_N4";
+
+    static constexpr int INPUTS              = 2 * (364 + 672 + 1036) * 24;
+    static constexpr int MAX_ACTIVE_FEATURES = 56;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        if (officer_count(pos) > 4)
+            return {0, INPUTS};
+
+        const int      orient = perspective_orient(pos, color);
+        const auto&    t      = xray_table();
+        const Bitboard occ    = pos.piecesBB();
+        int            k      = 0;
+
+        for (Color c : {Color::White, Color::Black})
+            for (PieceType pt : {PieceType::Bishop, PieceType::Rook, PieceType::Queen})
+            {
+                const int ti   = static_cast<int>(pt) - static_cast<int>(PieceType::Bishop);
+                const int kind = (static_cast<int>(c) ^ static_cast<int>(color)) * 3 + ti;
+                for (Square a : pos.piecesBB(Piece(pt, c)))
+                {
+                    const Bitboard first  = bb::attacks(pt, a, occ) & occ;
+                    const Bitboard second = bb::attacks(pt, a, occ & ~first) & occ & ~first;
+                    for (Square b : second)
+                    {
+                        const Square blk = *(bb::between(a, b) & occ).begin();
+                        const Piece  tp  = pos.pieceAt(b);
+                        const Piece  bp  = pos.pieceAt(blk);
+                        const int    pi =
+                          t.pair[ti][static_cast<int>(a) ^ orient][static_cast<int>(b) ^ orient];
+                        if (k == MAX_ACTIVE_FEATURES)
+                            return {k, INPUTS};
+                        features[k++] = t.offset[kind] + pi * 24
+                                      + ((static_cast<int>(tp.color()) ^ static_cast<int>(color)) * 6
+                                         + static_cast<int>(tp.type()))
+                                          * 2
+                                      + (bp.color() != c ? 1 : 0);
+                    }
+                }
+            }
+        return {k, INPUTS};
+    }
+};
+
+// Attacked_State_N<N>: every non-king piece (either colour) attacked by at least one enemy piece,
+// with its attacker and defender counts (direct attacks, kings and pawns included), while at most N
+// knights, bishops, rooks and queens are on the board (else empty): state = (min(attackers, 2) - 1)
+// * 3 + min(defenders, 2). Index: ((piece colour rel. the perspective * 5 + piece type) * 64 +
+// oriented square) * 6 + state. Orientation as in Full_Threats. 3840 inputs.
+static Bitboard attackers_to(const Position& pos, Square s, Color by, Bitboard occ) {
+    Bitboard r = bb::pawnAttacks(Bitboard::square(s), !by) & pos.piecesBB(Piece(PieceType::Pawn, by));
+    r |= bb::pseudoAttacks<PieceType::Knight>(s) & pos.piecesBB(Piece(PieceType::Knight, by));
+    r |= bb::pseudoAttacks<PieceType::King>(s) & pos.piecesBB(Piece(PieceType::King, by));
+    const Bitboard q = pos.piecesBB(Piece(PieceType::Queen, by));
+    r |= bb::attacks<PieceType::Bishop>(s, occ) & (pos.piecesBB(Piece(PieceType::Bishop, by)) | q);
+    r |= bb::attacks<PieceType::Rook>(s, occ) & (pos.piecesBB(Piece(PieceType::Rook, by)) | q);
+    return r;
+}
+
+template<int N>
+struct AttackedStateN {
+    static constexpr std::string_view NAME = N == 8 ? "Attacked_State_N8" : "Attacked_State_N10";
+
+    static constexpr int INPUTS              = 10 * 64 * 6;
+    static constexpr int MAX_ACTIVE_FEATURES = 56;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto& pos = e.pos;
+        if (officer_count(pos) > N)
+            return {0, INPUTS};
+
+        const int      orient = perspective_orient(pos, color);
+        const Bitboard occ    = pos.piecesBB();
+        int            k      = 0;
+
+        for (Color c : {Color::White, Color::Black})
+            for (PieceType pt : {PieceType::Pawn, PieceType::Knight, PieceType::Bishop, PieceType::Rook,
+                                 PieceType::Queen})
+                for (Square s : pos.piecesBB(Piece(pt, c)))
+                {
+                    const int na = attackers_to(pos, s, !c, occ).count();
+                    if (na == 0)
+                        continue;
+                    const int nd    = attackers_to(pos, s, c, occ).count();
+                    const int state = (std::min(na, 2) - 1) * 3 + std::min(nd, 2);
+                    if (k == MAX_ACTIVE_FEATURES)
+                        return {k, INPUTS};
+                    features[k++] =
+                      (((static_cast<int>(c) ^ static_cast<int>(color)) * 5 + static_cast<int>(pt)) * 64
+                       + (static_cast<int>(s) ^ orient))
+                        * 6
+                      + state;
+                }
+        return {k, INPUTS};
+    }
+};
+
 struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
     int                                             m_inputs;
@@ -493,6 +659,12 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<FullThreatsExtractor>();
     if (name == "PP_3Wide")
         return std::make_unique<PP_3WideExtractor>();
+    if (name == "XRay_Threats_N4")
+        return std::make_unique<SimpleExtractor<XRayThreatsN4>>();
+    if (name == "Attacked_State_N8")
+        return std::make_unique<SimpleExtractor<AttackedStateN<8>>>();
+    if (name == "Attacked_State_N10")
+        return std::make_unique<SimpleExtractor<AttackedStateN<10>>>();
     return nullptr;
 }
 
