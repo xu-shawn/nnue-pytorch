@@ -208,6 +208,46 @@ using K32Q2P4 = K32Q2Pc<4>;
 using K32Q2P2 = K32Q2Pc<2>;
 using K32Q2H2 = K32Q2Pc<2, true>;
 
+// K32H3: the compact layout of K32Q2H2. Its (no rook or queen on the board, opponent queen)
+// combination cannot occur, so there are 3 piece-square states per king bucket: buckets 0..63 are
+// king_bucket * 2 + opp_queen with some rook or queen on the board (laid out exactly like K32Q2), and
+// buckets 64..95 are 64 + king_bucket with no rook or queen on the board. This is the order of the
+// engine's compact HEAVY layout (heavy-compact: 45,056 + 22,528 exported piece-square rows).
+struct K32H3 {
+    static constexpr std::string_view NAME = "K32H3";
+
+    static constexpr int NUM_SQ              = 64;
+    static constexpr int NUM_PT              = 12;
+    static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
+    static constexpr int NUM_KING_BUCKETS    = NUM_SQ / 2;
+    static constexpr int NUM_BUCKETS         = NUM_KING_BUCKETS * 3;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS;
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos       = e.pos;
+        const auto ksq       = pos.kingSquare(color);
+        const bool opp_queen = pos.piecesBB(Piece(PieceType::Queen, !color)).any();
+        bool       heavy     = false;
+        for (Color c : {Color::White, Color::Black})
+            heavy = heavy || pos.piecesBB(Piece(PieceType::Rook, c)).any()
+                 || pos.piecesBB(Piece(PieceType::Queen, c)).any();
+        const int kb     = K32Q2::KingBuckets[static_cast<int>(orient_flip_2(color, ksq, ksq))];
+        const int bucket = heavy ? kb * 2 + (opp_queen ? 1 : 0) : NUM_KING_BUCKETS * 2 + kb;
+
+        int j = 0;
+        for (Square sq : pos.piecesBB())
+        {
+            const Piece p     = pos.pieceAt(sq);
+            const int   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            features[j++] = static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+                          + bucket * NUM_PLANES;
+        }
+        return {j, INPUTS};
+    }
+};
+
 template<int NumPcBuckets, bool Heavy = false>
 struct K32Q2PcExtractor: IFeatureExtractor {
     using Feature = K32Q2Pc<NumPcBuckets, Heavy>;
@@ -445,7 +485,7 @@ struct PP_3Wide {
 
     static constexpr int PAWN_IDS            = 2 * 48;
     static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int MAX_ACTIVE_FEATURES = 100;
 
     static int make_pawn_id(Color color, Square square) {
         return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
@@ -562,6 +602,64 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
     }
 };
 
+// Rams: a white pawn with a black pawn directly in front of it. From each perspective a ram is
+// identified by the oriented square of the lower of its two pawns (the perspective's own pawn),
+// on ranks 2 to 6: 40 ram ids. Orientation as in Full_Threats.
+struct Rams {
+    int           count = 0;
+    int           id[8];
+    std::uint64_t members[8];
+
+    Rams(const Position& pos, int orient) {
+        const std::uint64_t white = pos.piecesBB(whitePawn).bits(), black = pos.piecesBB(blackPawn).bits();
+        for (Square w : Bitboard::fromBits(white & (black >> 8)))
+        {
+            int a = static_cast<int>(w) ^ orient, b = (static_cast<int>(w) + 8) ^ orient;
+            id[count]      = std::min(a, b) - 8;
+            members[count] = (1ULL << static_cast<int>(w)) | (1ULL << (static_cast<int>(w) + 8));
+            ++count;
+        }
+    }
+};
+
+static int ram_orient(const Position& pos, Color color) {
+    return static_cast<int>(
+      FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+}
+
+// Every pair of rams on the board, by both ram ids (triangular index). These change only when
+// a ram forms or breaks.
+struct RamRam {
+    static constexpr std::string_view NAME = "Ram_Ram";
+
+    static constexpr int INPUTS              = 40 * 39 / 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 8 * 7 / 2;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos = e.pos;
+        const Rams rams(pos, ram_orient(pos, color));
+        int        k = 0;
+
+        for (int i = 0; i < rams.count; ++i)
+            for (int j = 0; j < rams.count; ++j)
+                if (rams.id[i] < rams.id[j])
+                    features[k++] = rams.id[j] * (rams.id[j] - 1) / 2 + rams.id[i];
+
+        return {k, INPUTS};
+    }
+};
+
+template<typename T>
+struct SimpleExtractor: IFeatureExtractor {
+    int inputs() const override { return T::INPUTS; }
+    int max_active_features() const override { return T::MAX_ACTIVE_FEATURES; }
+    std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
+        return T::fill_features_sparse(e, features, color);
+    }
+};
+
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
     if (name == "HalfKAv2_hm")
         return std::make_unique<HalfKAv2_hmExtractor>();
@@ -577,6 +675,10 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<FullThreatsExtractor>();
     if (name == "PP_3Wide")
         return std::make_unique<PP_3WideExtractor>();
+    if (name == "Ram_Ram")
+        return std::make_unique<SimpleExtractor<RamRam>>();
+    if (name == "K32H3")
+        return std::make_unique<SimpleExtractor<K32H3>>();
     return nullptr;
 }
 

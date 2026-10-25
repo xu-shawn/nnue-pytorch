@@ -10,18 +10,22 @@ from .halfka_v2_hm import HalfKav2Hm
 from .input_feature import InputFeature
 from .k32q2 import K32Q2
 from .k32q2h2 import K32Q2H2
+from .k32h3 import K32H3
 from .k32q2p2 import K32Q2P2
 from .k32q2p4 import K32Q2P4
 from .pp_3wide import PP3Wide
+from .ram_ram import RamRam
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
     "K32Q2^": K32Q2,
     "K32Q2H2^": K32Q2H2,
+    "K32H3^": K32H3,
     "K32Q2P2^": K32Q2P2,
     "K32Q2P4^": K32Q2P4,
     "Full_Threats": FullThreats,
     "PP_3Wide": PP3Wide,
+    "Ram_Ram": RamRam,
 }
 
 DEFAULT_FEATURES = "Full_Threats+PP_3Wide+K32Q2^"
