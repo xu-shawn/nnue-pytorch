@@ -332,7 +332,7 @@ struct FullThreats {
     static constexpr int PIECE_NB            = 12;
     static constexpr int COLOR_NB            = 2;
     static constexpr int PIECE_TYPE_NB       = 6;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int MAX_ACTIVE_FEATURES = 104;
 
     static constexpr int INPUTS = threatfeatures;
 
@@ -650,6 +650,101 @@ struct RamRam {
     }
 };
 
+// Ram_Pawn_Near: every ram with every other pawn on the ram's file or an adjacent file (the PP_3Wide
+// range of the ram's pawns). Index as Ram_Pawn: ram id * 96 + other pawn colour relative to the
+// perspective * 48 + oriented square - 8. Pawn-only, changes only when pawns move or are captured.
+struct RamPawnNear {
+    static constexpr std::string_view NAME = "Ram_Pawn_Near";
+
+    static constexpr int INPUTS              = 40 * 96;
+    static constexpr int MAX_ACTIVE_FEATURES = 24;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos    = e.pos;
+        const int  orient = ram_orient(pos, color);
+        const Rams rams(pos, orient);
+        int        k = 0;
+
+        for (int i = 0; i < rams.count; ++i)
+        {
+            const int f = (rams.id[i] + 8) & 7;  // oriented file of the ram
+            for (Color c : {Color::White, Color::Black})
+            {
+                const int rel = static_cast<int>(c) ^ static_cast<int>(color);
+                for (Square p : Bitboard::fromBits(pos.piecesBB(Piece(PieceType::Pawn, c)).bits() & ~rams.members[i]))
+                {
+                    const int o = static_cast<int>(p) ^ orient;
+                    if (std::abs((o & 7) - f) > 1)
+                        continue;
+                    if (k == MAX_ACTIVE_FEATURES)
+                        return {k, INPUTS};
+                    features[k++] = rams.id[i] * 96 + rel * 48 + o - 8;
+                }
+            }
+        }
+        return {k, INPUTS};
+    }
+};
+
+// Ram_Support: every ram with every pawn of the same colour diagonally adjacent to one of the ram's
+// pawns (the chains through the ram). Index: ram id * 8 + (ram pawn: 0 the perspective's lower one,
+// 1 the upper one) * 4 + (neighbour on the higher oriented rank) * 2 + (on the higher oriented file).
+struct RamSupport {
+    static constexpr std::string_view NAME = "Ram_Support";
+
+    static constexpr int INPUTS              = 40 * 8;
+    static constexpr int MAX_ACTIVE_FEATURES = 24;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos    = e.pos;
+        const int  orient = ram_orient(pos, color);
+        const Rams rams(pos, orient);
+        const std::uint64_t wp = pos.piecesBB(whitePawn).bits(), bp = pos.piecesBB(blackPawn).bits();
+        int        k = 0;
+
+        for (int i = 0; i < rams.count; ++i)
+        {
+            const int lo = rams.id[i] + 8, hi = lo + 8;  // oriented squares of the lower and upper ram pawn
+            for (int which = 0; which < 2; ++which)
+            {
+                const int o = which ? hi : lo;
+                // the lower pawn belongs to the perspective, the upper one to the opponent
+                const bool          ownSide = which == 0;
+                const Color         c       = ownSide ? color : !color;
+                const std::uint64_t same    = c == Color::White ? wp : bp;
+                for (int dr : {-1, 1})
+                    for (int df : {-1, 1})
+                    {
+                        const int r = (o >> 3) + dr, f = (o & 7) + df;
+                        if (r < 0 || r > 7 || f < 0 || f > 7)
+                            continue;
+                        if (!((same >> ((r * 8 + f) ^ orient)) & 1))
+                            continue;
+                        if (k == MAX_ACTIVE_FEATURES)
+                            return {k, INPUTS};
+                        features[k++] = rams.id[i] * 8 + which * 4 + (dr > 0) * 2 + (df > 0);
+                    }
+            }
+        }
+        return {k, INPUTS};
+    }
+};
+
+// Reserves 24 slots and emits nothing (one never-active input row): keeps a base run on the 288-slot
+// GPU kernels next to runs with one extra 24-slot input.
+struct Pad24 {
+    static constexpr std::string_view NAME = "Pad24";
+
+    static constexpr int INPUTS              = 1;
+    static constexpr int MAX_ACTIVE_FEATURES = 24;
+
+    static std::pair<int, int> fill_features_sparse(const TrainingDataEntry&, int*, Color) {
+        return {0, INPUTS};
+    }
+};
+
 template<typename T>
 struct SimpleExtractor: IFeatureExtractor {
     int inputs() const override { return T::INPUTS; }
@@ -677,6 +772,12 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PP_3WideExtractor>();
     if (name == "Ram_Ram")
         return std::make_unique<SimpleExtractor<RamRam>>();
+    if (name == "Ram_Pawn_Near")
+        return std::make_unique<SimpleExtractor<RamPawnNear>>();
+    if (name == "Ram_Support")
+        return std::make_unique<SimpleExtractor<RamSupport>>();
+    if (name == "Pad24")
+        return std::make_unique<SimpleExtractor<Pad24>>();
     if (name == "K32H3")
         return std::make_unique<SimpleExtractor<K32H3>>();
     return nullptr;
