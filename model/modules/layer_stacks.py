@@ -36,6 +36,10 @@ class LayerStacks(nn.Module):
         with torch.no_grad():
             self.output.linear.bias.zero_()
 
+        factors = [f for f in getattr(config, "ls_factors", "").split(":") if f]
+        if factors:
+            self.set_group_factors(self.factor_maps(count, factors))
+
     def forward(
         self,
         x: torch.Tensor,
@@ -92,6 +96,26 @@ class LayerStacks(nn.Module):
         )
         return l3x_
 
+    @staticmethod
+    def factor_maps(count: int, names: list[str]) -> list[torch.Tensor]:
+        """Group id of every stack (bucket = piece-count band * 4 + queen bucket) under each named factor."""
+        assert count % 4 == 0, count
+        s = torch.arange(count)
+        table = {"band": s // 4, "queen": s % 4}
+        for n in names:
+            assert n in table, f"unknown layer-stack factor {n!r} (known: {sorted(table)})"
+        return [table[n] for n in names]
+
+    def set_group_factors(self, maps: list[torch.Tensor]) -> None:
+        for layer in (self.l1, self.l2, self.output):
+            layer.set_group_factors(maps)
+
+    def group_factor_params(self, biases: bool) -> list:
+        out = []
+        for layer in (self.l1, self.l2, self.output):
+            out += list(layer.group_factor_b if biases else layer.group_factor_w)
+        return out
+
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.l1.zero_virtual_weights()
@@ -109,3 +133,5 @@ class LayerStacks(nn.Module):
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(self) -> None:
         self.l1.coalesce_weights()
+        self.l2.coalesce_group_factors()
+        self.output.coalesce_group_factors()
