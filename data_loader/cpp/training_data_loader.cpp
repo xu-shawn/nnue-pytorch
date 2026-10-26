@@ -213,6 +213,7 @@ using K32Q2H2 = K32Q2Pc<2, true>;
 // king_bucket * 2 + opp_queen with some rook or queen on the board (laid out exactly like K32Q2), and
 // buckets 64..95 are 64 + king_bucket with no rook or queen on the board. This is the order of the
 // engine's compact HEAVY layout (heavy-compact: 45,056 + 22,528 exported piece-square rows).
+// Legacy: K32H3B has the same states in a block-major layout.
 struct K32H3 {
     static constexpr std::string_view NAME = "K32H3";
 
@@ -235,6 +236,54 @@ struct K32H3 {
                  || pos.piecesBB(Piece(PieceType::Queen, c)).any();
         const int kb     = K32Q2::KingBuckets[static_cast<int>(orient_flip_2(color, ksq, ksq))];
         const int bucket = heavy ? kb * 2 + (opp_queen ? 1 : 0) : NUM_KING_BUCKETS * 2 + kb;
+
+        int j = 0;
+        for (Square sq : pos.piecesBB())
+        {
+            const Piece p     = pos.pieceAt(sq);
+            const int   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            features[j++] = static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+                          + bucket * NUM_PLANES;
+        }
+        return {j, INPUTS};
+    }
+};
+
+// K32H3B: the same 3 piece-square states per king bucket as K32H3, laid out block-major:
+// bucket = state * 32 + king_bucket, in order of increasing heavy material:
+//   state 0: no rook or queen on the board (either side),
+//   state 1: some rook or queen on the board, but the opponent of the perspective has no queen,
+//   state 2: the opponent of the perspective has a queen.
+// The state is the engine's piece-square bucket (Features::K32Q2::bucket()), so the engine offsets
+// the weights by state * 22,528 rows and indexes the block like HalfKAv2_hm.
+struct K32H3B {
+    static constexpr std::string_view NAME = "K32H3B";
+
+    static constexpr int NUM_SQ              = 64;
+    static constexpr int NUM_PT              = 12;
+    static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
+    static constexpr int NUM_KING_BUCKETS    = NUM_SQ / 2;
+    static constexpr int NUM_STATES          = 3;
+    static constexpr int NUM_BUCKETS         = NUM_KING_BUCKETS * NUM_STATES;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS;
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static int state(const Position& pos, Color color) {
+        if (pos.piecesBB(Piece(PieceType::Queen, !color)).any())
+            return 2;
+        for (Color c : {Color::White, Color::Black})
+            if (pos.piecesBB(Piece(PieceType::Rook, c)).any()
+                || pos.piecesBB(Piece(PieceType::Queen, c)).any())
+                return 1;
+        return 0;
+    }
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos    = e.pos;
+        const auto ksq    = pos.kingSquare(color);
+        const int  kb     = K32Q2::KingBuckets[static_cast<int>(orient_flip_2(color, ksq, ksq))];
+        const int  bucket = state(pos, color) * NUM_KING_BUCKETS + kb;
 
         int j = 0;
         for (Square sq : pos.piecesBB())
@@ -325,8 +374,22 @@ constexpr ThreatOffsetTable threatoffsets  = threatfeaturecalc.table;
 constexpr int               threatfeatures = threatfeaturecalc.totalfeatures;
 static_assert(threatfeatures == 59808);
 
-struct FullThreats {
-    static constexpr std::string_view NAME = "Full_Threats";
+// Square orientation of the threat-style families (Full_Threats, PP_3Wide, Ram_Ram), as an XOR
+// mask: the board is flipped vertically for black, and mirrored horizontally
+// - HalfKaMirror (the "_hm" families): when the perspective's king is on files a..d, so that it
+//   lands on e..h, as in HalfKAv2_hm, K32Q2 and K32H3 (orient_flip_2);
+// - otherwise (legacy): when the perspective's king is on files e..h.
+// The two differ by a fixed horizontal mirror of both squares, so each _hm family's indices are a
+// fixed permutation of its legacy family's (scripts/convert_hm_layout.py).
+template<bool HalfKaMirror>
+static int threat_orient(Color perspective, Square ksq) {
+    const bool mirror = (ksq.file() < fileE) == HalfKaMirror;
+    return (mirror ? 7 : 0) ^ (perspective == Color::Black ? 56 : 0);
+}
+
+template<bool HalfKaMirror>
+struct FullThreatsT {
+    static constexpr std::string_view NAME = HalfKaMirror ? "Full_Threats_hm" : "Full_Threats";
 
     static constexpr int SQUARE_NB           = 64;
     static constexpr int PIECE_NB            = 12;
@@ -337,25 +400,6 @@ struct FullThreats {
     static constexpr int INPUTS = threatfeatures;
 
     // clang-format off
-    static constexpr Square OrientTBL[COLOR_NB][SQUARE_NB] = {
-      { a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1,
-        a1, a1, a1, a1, h1, h1, h1, h1 },
-      { a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8,
-        a8, a8, a8, a8, h8, h8, h8, h8 }
-    };
-
     static constexpr int map[PIECE_TYPE_NB][PIECE_TYPE_NB] = {
       {-1, 0, -1, 1, -1, -1},
       { 0, 1,  2, 3,  4, -1},
@@ -369,8 +413,9 @@ struct FullThreats {
 
     static int
     threat_index(Color perspective, Piece attkr, Square from, Square to, Piece attkd, Square ksq) {
-        from = (Square) ((int) from ^ (int) OrientTBL[(int) perspective][(int) ksq]);
-        to   = (Square) ((int) to ^ (int) OrientTBL[(int) perspective][(int) ksq]);
+        const int orient = threat_orient<HalfKaMirror>(perspective, ksq);
+        from             = (Square) ((int) from ^ orient);
+        to               = (Square) ((int) to ^ orient);
 
         if (perspective == Color::Black)
         {
@@ -471,17 +516,9 @@ struct FullThreats {
     }
 };
 
-struct FullThreatsExtractor: IFeatureExtractor {
-    int inputs() const override { return FullThreats::INPUTS; }
-    int max_active_features() const override { return FullThreats::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
-        return FullThreats::fill_features_sparse(e, features, color);
-    }
-};
-
-struct PP_3Wide {
-    static constexpr std::string_view NAME = "PP_3Wide";
+template<bool HalfKaMirror>
+struct PP_3WideT {
+    static constexpr std::string_view NAME = HalfKaMirror ? "PP_3Wide_hm" : "PP_3Wide";
 
     static constexpr int PAWN_IDS            = 2 * 48;
     static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
@@ -493,10 +530,9 @@ struct PP_3Wide {
 
     static int make_index(
       Color perspective, Color color, Square from, Square to, Color paired_color, Square ksq) {
-        int orient = static_cast<int>(
-          FullThreats::OrientTBL[static_cast<int>(perspective)][static_cast<int>(ksq)]);
-        Square from_oriented = static_cast<Square>(static_cast<int>(from) ^ orient);
-        Square to_oriented   = static_cast<Square>(static_cast<int>(to) ^ orient);
+        const int orient        = threat_orient<HalfKaMirror>(perspective, ksq);
+        Square    from_oriented = static_cast<Square>(static_cast<int>(from) ^ orient);
+        Square    to_oriented   = static_cast<Square>(static_cast<int>(to) ^ orient);
 
         Color color_oriented =
           static_cast<Color>(static_cast<int>(color) ^ static_cast<int>(perspective));
@@ -552,15 +588,6 @@ struct PP_3Wide {
     }
 };
 
-struct PP_3WideExtractor: IFeatureExtractor {
-    int inputs() const override { return PP_3Wide::INPUTS; }
-    int max_active_features() const override { return PP_3Wide::MAX_ACTIVE_FEATURES; }
-    std::pair<int, int>
-    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) const override {
-        return PP_3Wide::fill_features_sparse(e, features, color);
-    }
-};
-
 struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
     int                                             m_inputs;
@@ -604,7 +631,7 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
 
 // Rams: a white pawn with a black pawn directly in front of it. From each perspective a ram is
 // identified by the oriented square of the lower of its two pawns (the perspective's own pawn),
-// on ranks 2 to 6: 40 ram ids. Orientation as in Full_Threats.
+// on ranks 2 to 6: 40 ram ids. Orientation as in Full_Threats (threat_orient()).
 struct Rams {
     int           count = 0;
     int           id[8];
@@ -622,15 +649,11 @@ struct Rams {
     }
 };
 
-static int ram_orient(const Position& pos, Color color) {
-    return static_cast<int>(
-      FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
-}
-
 // Every pair of rams on the board, by both ram ids (triangular index). These change only when
 // a ram forms or breaks.
-struct RamRam {
-    static constexpr std::string_view NAME = "Ram_Ram";
+template<bool HalfKaMirror>
+struct RamRamT {
+    static constexpr std::string_view NAME = HalfKaMirror ? "Ram_Ram_hm" : "Ram_Ram";
 
     static constexpr int INPUTS              = 40 * 39 / 2;
     static constexpr int MAX_ACTIVE_FEATURES = 8 * 7 / 2;
@@ -638,7 +661,7 @@ struct RamRam {
     static std::pair<int, int>
     fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
         auto&      pos = e.pos;
-        const Rams rams(pos, ram_orient(pos, color));
+        const Rams rams(pos, threat_orient<HalfKaMirror>(color, pos.kingSquare(color)));
         int        k = 0;
 
         for (int i = 0; i < rams.count; ++i)
@@ -672,13 +695,21 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
     if (name == "K32Q2H2")
         return std::make_unique<K32Q2PcExtractor<2, true>>();
     if (name == "Full_Threats")
-        return std::make_unique<FullThreatsExtractor>();
+        return std::make_unique<SimpleExtractor<FullThreatsT<false>>>();
     if (name == "PP_3Wide")
-        return std::make_unique<PP_3WideExtractor>();
+        return std::make_unique<SimpleExtractor<PP_3WideT<false>>>();
     if (name == "Ram_Ram")
-        return std::make_unique<SimpleExtractor<RamRam>>();
+        return std::make_unique<SimpleExtractor<RamRamT<false>>>();
     if (name == "K32H3")
         return std::make_unique<SimpleExtractor<K32H3>>();
+    if (name == "Full_Threats_hm")
+        return std::make_unique<SimpleExtractor<FullThreatsT<true>>>();
+    if (name == "PP_3Wide_hm")
+        return std::make_unique<SimpleExtractor<PP_3WideT<true>>>();
+    if (name == "Ram_Ram_hm")
+        return std::make_unique<SimpleExtractor<RamRamT<true>>>();
+    if (name == "K32H3B")
+        return std::make_unique<SimpleExtractor<K32H3B>>();
     return nullptr;
 }
 

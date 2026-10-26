@@ -46,3 +46,12 @@ class PP3Wide(InputFeature):
     @torch.no_grad()
     def load_export_weights(self, export_weight: torch.Tensor) -> None:
         self.weight.data.copy_(export_weight)
+
+
+class PP3WideHm(PP3Wide):
+    """PP_3Wide oriented like HalfKAv2_hm (mirrored when the king is on files a..d, see
+    FullThreatsHm). Same index space; the indices are a fixed permutation of PP_3Wide's."""
+
+    HASH = 0x5C80FA69
+    FEATURE_NAME = "PP_3Wide_hm"
+    INPUT_FEATURE_NAME = "PP_3Wide_hm"

@@ -8,6 +8,8 @@ class K32H3(K32Q2):
     bucket = king_bucket * 2 + opp_queen (0..63) while any rook or queen is on the board, laid out
     exactly like K32Q2, else 64 + king_bucket. Exported in this order, it is the engine's compact
     layout (45,056 + 22,528 rows).
+
+    Legacy layout: K32H3B holds the same states block-major.
     """
 
     HASH = 0x32B5E2E3

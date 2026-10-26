@@ -46,3 +46,18 @@ class FullThreats(InputFeature):
     @torch.no_grad()
     def load_export_weights(self, export_weight: torch.Tensor) -> None:
         self.weight.data.copy_(export_weight)
+
+
+class FullThreatsHm(FullThreats):
+    """Full_Threats oriented like HalfKAv2_hm: for each perspective the board is flipped vertically
+    for black and mirrored horizontally when that perspective's king is on files a..d, so that the
+    king lands on e..h (Full_Threats mirrors when the king is on e..h instead).
+
+    Same index space; the indices are a fixed permutation of Full_Threats' (a horizontal mirror of
+    both squares, with the attacker and the attacked piece swapped for the deduplicated same-type
+    pairs on one rank). scripts/convert_hm_layout.py converts nets.
+    """
+
+    HASH = 0x2C41EAEA
+    FEATURE_NAME = "Full_Threats_hm"
+    INPUT_FEATURE_NAME = "Full_Threats_hm"
