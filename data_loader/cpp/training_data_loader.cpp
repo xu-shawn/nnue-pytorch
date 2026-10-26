@@ -778,6 +778,48 @@ struct RamSupport {
 
 // Reserves 24 slots and emits nothing (one never-active input row): keeps a base run on the 288-slot
 // GPU kernels next to runs with one extra 24-slot input.
+// Passer_K32H3: every passed pawn (no enemy pawn ahead on its own or an adjacent file), bucketed like K32H3 by the
+// perspective's king bucket and heavy / opponent-queen state: index = bucket * 96 + (pawn colour != perspective) * 48
+// + oriented square - 8. Passed status only changes when pawns move or are captured.
+struct PasserK32H3 {
+    static constexpr std::string_view NAME = "Passer_K32H3";
+
+    static constexpr int INPUTS              = 96 * 96;
+    static constexpr int MAX_ACTIVE_FEATURES = 24;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos       = e.pos;
+        const auto ksq       = pos.kingSquare(color);
+        const bool opp_queen = pos.piecesBB(Piece(PieceType::Queen, !color)).any();
+        bool       heavy     = false;
+        for (Color c : {Color::White, Color::Black})
+            heavy = heavy || pos.piecesBB(Piece(PieceType::Rook, c)).any()
+                 || pos.piecesBB(Piece(PieceType::Queen, c)).any();
+        const int kb     = K32Q2::KingBuckets[static_cast<int>(orient_flip_2(color, ksq, ksq))];
+        const int bucket = heavy ? kb * 2 + (opp_queen ? 1 : 0) : 64 + kb;
+
+        constexpr std::uint64_t fileA = 0x0101010101010101ULL, fileH = 0x8080808080808080ULL;
+        auto widen = [](std::uint64_t b) { return b | ((b & ~fileH) << 1) | ((b & ~fileA) >> 1); };
+        const std::uint64_t wp = pos.piecesBB(Piece(PieceType::Pawn, Color::White)).bits();
+        const std::uint64_t bp = pos.piecesBB(Piece(PieceType::Pawn, Color::Black)).bits();
+        std::uint64_t south = 0, north = 0, t = bp, u = wp;
+        for (int i = 0; i < 7; ++i)
+        {
+            t >>= 8, u <<= 8;
+            south |= t, north |= u;
+        }
+        const std::uint64_t passed[2] = {wp & ~widen(south), bp & ~widen(north)};
+
+        int k = 0;
+        for (Color c : {Color::White, Color::Black})
+            for (Square sq : Bitboard::fromBits(passed[c == Color::White ? 0 : 1]))
+                features[k++] = bucket * 96 + (c != color) * 48
+                              + static_cast<int>(orient_flip_2(color, sq, ksq)) - 8;
+        return {k, INPUTS};
+    }
+};
+
 struct Pad24 {
     static constexpr std::string_view NAME = "Pad24";
 
@@ -826,6 +868,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<SimpleExtractor<K32H3>>();
     if (name == "K32H5M")
         return std::make_unique<SimpleExtractor<K32H5M>>();
+    if (name == "Passer_K32H3")
+        return std::make_unique<SimpleExtractor<PasserK32H3>>();
     return nullptr;
 }
 

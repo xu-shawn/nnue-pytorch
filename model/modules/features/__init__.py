@@ -15,7 +15,7 @@ from .k32h5m import K32H5M
 from .k32q2p2 import K32Q2P2
 from .k32q2p4 import K32Q2P4
 from .pp_3wide import PP3Wide
-from .ram_ram import Pad24, RamPawnNear, RamRam, RamSupport
+from .ram_ram import Pad24, PasserK32H3, RamPawnNear, RamRam, RamSupport
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "HalfKAv2_hm^": HalfKav2Hm,
@@ -31,6 +31,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "Ram_Pawn_Near": RamPawnNear,
     "Ram_Support": RamSupport,
     "Pad24": Pad24,
+    "Passer_K32H3": PasserK32H3,
 }
 
 DEFAULT_FEATURES = "Full_Threats+PP_3Wide+K32Q2^"

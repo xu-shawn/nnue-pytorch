@@ -47,3 +47,16 @@ class Pad24(PP3Wide):
 
     NUM_INPUTS = 1
     NUM_REAL_FEATURES = NUM_INPUTS
+
+
+class PasserK32H3(PP3Wide):
+    """Every passed pawn, bucketed like K32H3 by the perspective's king bucket and heavy / opponent-queen state:
+    bucket * 96 + (pawn colour != perspective) * 48 + oriented square - 8 (see the loader)."""
+
+    HASH = 0x9A55E2E3
+    FEATURE_NAME = "Passer_K32H3"
+    INPUT_FEATURE_NAME = "Passer_K32H3"
+    MAX_ACTIVE_FEATURES = 24
+
+    NUM_INPUTS = 96 * 96
+    NUM_REAL_FEATURES = NUM_INPUTS
