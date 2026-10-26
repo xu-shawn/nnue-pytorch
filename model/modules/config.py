@@ -13,3 +13,7 @@ class LayerStacksConfig:
     """Size of second hidden layer."""
     L3: Annotated[int, tyro.conf.arg(name="l3")] = 32
     """Size of third hidden layer."""
+    ls_factors: Annotated[str, tyro.conf.arg(name="ls-factors")] = ""
+    """Factorized layer stacks: ':'-separated factors shared by stacks with the same piece-count band ("band") or
+    queen bucket ("queen"), added to every stack layer during training and folded into the stacks at export
+    (the exported net is unchanged in format). Empty = off."""

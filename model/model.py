@@ -64,6 +64,16 @@ class NNUEModel(nn.Module):
                                 p_data_fp32.new_full(p_data_fp32.shape, max_weight)
                                 - expanded_virtual_layer
                             )
+                    if "stacked_layer" in group:
+                        ge = group["stacked_layer"].group_expansion()
+                        if ge is not None:
+                            gw = ge[0].detach()
+                            if not torch.is_tensor(min_weight):
+                                min_weight = p_data_fp32.new_full(p_data_fp32.shape, min_weight)
+                            if not torch.is_tensor(max_weight):
+                                max_weight = p_data_fp32.new_full(p_data_fp32.shape, max_weight)
+                            min_weight = min_weight - gw
+                            max_weight = max_weight - gw
                     p_data_fp32.clamp_(min_weight, max_weight)
 
     @torch.no_grad()
