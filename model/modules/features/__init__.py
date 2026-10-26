@@ -11,6 +11,7 @@ from .input_feature import InputFeature
 from .k32q2 import K32Q2
 from .k32q2h2 import K32Q2H2
 from .k32h3 import K32H3
+from .k32h5m import K32H5M
 from .k32q2p2 import K32Q2P2
 from .k32q2p4 import K32Q2P4
 from .pp_3wide import PP3Wide
@@ -21,6 +22,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "K32Q2^": K32Q2,
     "K32Q2H2^": K32Q2H2,
     "K32H3^": K32H3,
+    "K32H5M^": K32H5M,
     "K32Q2P2^": K32Q2P2,
     "K32Q2P4^": K32Q2P4,
     "Full_Threats": FullThreats,

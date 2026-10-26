@@ -248,6 +248,50 @@ struct K32H3 {
     }
 };
 
+// K32H5M: K32H3 with its two heavy states split by whether any knight or bishop is on the board,
+// 5 piece-square states per king bucket. Buckets 0..95 are K32H3's (0..63 with a minor on the board),
+// buckets 96..159 are 96 + king_bucket * 2 + opp_queen with some rook or queen but no minor.
+struct K32H5M {
+    static constexpr std::string_view NAME = "K32H5M";
+
+    static constexpr int NUM_SQ              = 64;
+    static constexpr int NUM_PT              = 12;
+    static constexpr int NUM_PLANES          = NUM_SQ * NUM_PT;
+    static constexpr int NUM_KING_BUCKETS    = NUM_SQ / 2;
+    static constexpr int NUM_BUCKETS         = NUM_KING_BUCKETS * 5;
+    static constexpr int INPUTS              = NUM_PLANES * NUM_BUCKETS;
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos       = e.pos;
+        const auto ksq       = pos.kingSquare(color);
+        const bool opp_queen = pos.piecesBB(Piece(PieceType::Queen, !color)).any();
+        bool       heavy = false, minor = false;
+        for (Color c : {Color::White, Color::Black})
+        {
+            heavy = heavy || pos.piecesBB(Piece(PieceType::Rook, c)).any()
+                 || pos.piecesBB(Piece(PieceType::Queen, c)).any();
+            minor = minor || pos.piecesBB(Piece(PieceType::Knight, c)).any()
+                 || pos.piecesBB(Piece(PieceType::Bishop, c)).any();
+        }
+        const int kb     = K32Q2::KingBuckets[static_cast<int>(orient_flip_2(color, ksq, ksq))];
+        const int bucket = !heavy ? NUM_KING_BUCKETS * 2 + kb
+                         : minor  ? kb * 2 + (opp_queen ? 1 : 0)
+                                  : NUM_KING_BUCKETS * 3 + kb * 2 + (opp_queen ? 1 : 0);
+
+        int j = 0;
+        for (Square sq : pos.piecesBB())
+        {
+            const Piece p     = pos.pieceAt(sq);
+            const int   p_idx = static_cast<int>(p.type()) * 2 + (p.color() != color);
+            features[j++] = static_cast<int>(orient_flip_2(color, sq, ksq)) + p_idx * NUM_SQ
+                          + bucket * NUM_PLANES;
+        }
+        return {j, INPUTS};
+    }
+};
+
 template<int NumPcBuckets, bool Heavy = false>
 struct K32Q2PcExtractor: IFeatureExtractor {
     using Feature = K32Q2Pc<NumPcBuckets, Heavy>;
@@ -780,6 +824,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<SimpleExtractor<Pad24>>();
     if (name == "K32H3")
         return std::make_unique<SimpleExtractor<K32H3>>();
+    if (name == "K32H5M")
+        return std::make_unique<SimpleExtractor<K32H5M>>();
     return nullptr;
 }
 
