@@ -2,21 +2,26 @@ from .k32q2 import K32Q2, InverseKingBuckets
 
 
 class K32H3(K32Q2):
-    """Compact layout of K32Q2H2 (piece-square buckets by heavy pieces): the (no rook or queen on the
-    board, opponent queen) combination cannot occur, so each king bucket has 3 piece-square states.
+    """K32H3 (32 own-king buckets x 3 piece-square states) laid out block-major:
 
-    bucket = king_bucket * 2 + opp_queen (0..63) while any rook or queen is on the board, laid out
-    exactly like K32Q2, else 64 + king_bucket. Exported in this order, it is the engine's compact
-    layout (45,056 + 22,528 rows).
+    bucket = state * 32 + king_bucket, with the states in order of increasing heavy material
+      0: no rook or queen on the board (either side),
+      1: some rook or queen on the board, but the opponent of the perspective has no queen,
+      2: the opponent of the perspective has a queen.
+    (No rook or queen on the board with an opponent queen cannot occur, hence 3 states, not 4.)
 
-    Legacy layout: K32H3B holds the same states block-major.
+    The state is the engine's piece-square bucket, so each state's 22,528 exported rows
+    (32 x 704) are one contiguous block that the engine indexes like HalfKAv2_hm. Exported in this
+    order (67,584 rows). K32H3L (the former K32H3) holds the same weights in a legacy interleave;
+    scripts/convert_hm_layout.py converts nets.
     """
 
-    HASH = 0x32B5E2E3
+    HASH = 0xAB005CEF  # crc32("K32H3")
     FEATURE_NAME = "K32H3^"
     INPUT_FEATURE_NAME = "K32H3"
 
-    NUM_BUCKETS = K32Q2.NUM_KING_BUCKETS * 3  # 96
+    NUM_STATES = 3
+    NUM_BUCKETS = K32Q2.NUM_KING_BUCKETS * NUM_STATES  # 96
     NUM_INPUTS = K32Q2.NUM_PLANES * NUM_BUCKETS  # 73,728
 
     # Export size uses 11 piece types (704 * 96 = 67,584)
@@ -24,5 +29,4 @@ class K32H3(K32Q2):
 
     @classmethod
     def own_king_square(cls, bucket: int) -> int:
-        kb = bucket // 2 if bucket < 2 * cls.NUM_KING_BUCKETS else bucket - 2 * cls.NUM_KING_BUCKETS
-        return InverseKingBuckets[kb]
+        return InverseKingBuckets[bucket % cls.NUM_KING_BUCKETS]

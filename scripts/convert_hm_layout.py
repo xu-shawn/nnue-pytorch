@@ -1,21 +1,22 @@
 """Convert .nnue nets between the legacy input layouts and the HalfKA-consistent ones.
 
     Full_Threats -> Full_Threats_hm    PP_3Wide -> PP_3Wide_hm    Ram_Ram -> Ram_Ram_hm
-    K32H3^       -> K32H3B^            (other components, e.g. K32Q2^, are copied unchanged)
+    K32H3L^ (legacy K32H3^) -> K32H3^            (other components, e.g. K32Q2^, are copied unchanged)
 
 The legacy threat-style families (Full_Threats, PP_3Wide, Ram_Ram) mirror the board horizontally
 when the perspective's king is on files e..h; the _hm families mirror it when the king is on a..d,
 as HalfKAv2_hm, K32Q2 and K32H3 do. The two orientations differ by a fixed horizontal mirror of
-both squares (square ^ 7), so each family's rows are a fixed permutation of the legacy rows. K32H3B
-holds K32H3's rows block-major (state * 32 + king bucket, see model/modules/features/k32h3b.py).
+both squares (square ^ 7), so each family's rows are a fixed permutation of the legacy rows. K32H3
+holds the legacy K32H3L's rows block-major (state * 32 + king bucket, see model/modules/features/k32h3.py).
 
 The conversion permutes the quantized feature transformer rows and replaces the feature hash in
 the two header words that contain it; everything else is copied byte for byte, so the converted
 net evaluates exactly like the source on an engine for the new layout. --reverse converts back.
 
 usage: python scripts/convert_hm_layout.py [--reverse] [--features F] src.nnue dst.nnue
-       (F: the source net's feature set, default Full_Threats+PP_3Wide+Ram_Ram+K32H3^,
-        or Full_Threats_hm+PP_3Wide_hm+Ram_Ram_hm+K32H3B^ with --reverse)
+       (F: the source net's feature set, default Full_Threats+PP_3Wide+Ram_Ram+K32H3L^; in the forward direction a
+        legacy name K32H3^ is read as K32H3L^,
+        or Full_Threats_hm+PP_3Wide_hm+Ram_Ram_hm+K32H3^ with --reverse)
 """
 
 import argparse
@@ -29,18 +30,18 @@ COMPONENTS = {
     "Full_Threats": (0x2E6B9D04, 59808, 1),
     "PP_3Wide": (0x86F2B1DD, 4560, 1),
     "Ram_Ram": (0x3A9E1C03, 780, 1),
-    "K32H3^": (0x32B5E2E3, 67584, 1),
+    "K32H3L^": (0x32B5E2E3, 67584, 1),  # legacy interleaved K32H3 (nets of the ram-k32h3 / heavy branches)
     "K32Q2^": (0x32B5E284, 45056, 1),
     "Full_Threats_hm": (0x2C41EAEA, 59808, 1),
     "PP_3Wide_hm": (0x5C80FA69, 4560, 1),
     "Ram_Ram_hm": (0x5E9FCAC8, 780, 1),
-    "K32H3B^": (0x7ACE3084, 67584, 1),
+    "K32H3^": (0xAB005CEF, 67584, 1),
 }
 TO_NEW = {
     "Full_Threats": "Full_Threats_hm",
     "PP_3Wide": "PP_3Wide_hm",
     "Ram_Ram": "Ram_Ram_hm",
-    "K32H3^": "K32H3B^",
+    "K32H3L^": "K32H3^",
 }
 TO_OLD = {v: k for k, v in TO_NEW.items()}
 
@@ -205,8 +206,8 @@ def ram_ram_perm():
 
 
 def k32h3_perm():
-    """perm[legacy row] = K32H3B row. Legacy buckets: kb * 2 + opp_queen (0..63, some rook or queen
-    on the board), 64 + kb (none); K32H3B buckets: state * 32 + kb. 704 rows per bucket."""
+    """perm[legacy row] = K32H3 row. Legacy buckets: kb * 2 + opp_queen (0..63, some rook or queen
+    on the board), 64 + kb (none); K32H3 buckets: state * 32 + kb. 704 rows per bucket."""
     bucket = np.empty(96, dtype=np.int64)
     for kb in range(32):
         bucket[kb * 2 + 0] = (
@@ -221,7 +222,7 @@ PERMS = {
     "Full_Threats": full_threats_perm,
     "PP_3Wide": pp_3wide_perm,
     "Ram_Ram": ram_ram_perm,
-    "K32H3^": k32h3_perm,
+    "K32H3L^": k32h3_perm,
 }
 
 
@@ -297,10 +298,12 @@ def main():
     p.add_argument("--description", default=None, help="replace the net description")
     a = p.parse_args()
     feats = a.features or (
-        "Full_Threats_hm+PP_3Wide_hm+Ram_Ram_hm+K32H3B^"
+        "Full_Threats_hm+PP_3Wide_hm+Ram_Ram_hm+K32H3^"
         if a.reverse
-        else "Full_Threats+PP_3Wide+Ram_Ram+K32H3^"
+        else "Full_Threats+PP_3Wide+Ram_Ram+K32H3L^"
     )
+    if not a.reverse:  # legacy nets were exported as K32H3^, which now names the block-major layout
+        feats = "+".join("K32H3L^" if x == "K32H3^" else x for x in feats.split("+"))
     with open(a.src, "rb") as f:
         buf = f.read()
     out, dst_feats, l1 = convert(buf, feats, a.reverse, a.description)

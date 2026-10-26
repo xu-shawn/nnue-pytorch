@@ -208,14 +208,14 @@ using K32Q2P4 = K32Q2Pc<4>;
 using K32Q2P2 = K32Q2Pc<2>;
 using K32Q2H2 = K32Q2Pc<2, true>;
 
-// K32H3: the compact layout of K32Q2H2. Its (no rook or queen on the board, opponent queen)
+// K32H3L (legacy K32H3): the compact layout of K32Q2H2. Its (no rook or queen on the board, opponent queen)
 // combination cannot occur, so there are 3 piece-square states per king bucket: buckets 0..63 are
 // king_bucket * 2 + opp_queen with some rook or queen on the board (laid out exactly like K32Q2), and
 // buckets 64..95 are 64 + king_bucket with no rook or queen on the board. This is the order of the
 // engine's compact HEAVY layout (heavy-compact: 45,056 + 22,528 exported piece-square rows).
-// Legacy: K32H3B has the same states in a block-major layout.
-struct K32H3 {
-    static constexpr std::string_view NAME = "K32H3";
+// Legacy: K32H3 has the same states in a block-major layout.
+struct K32H3L {
+    static constexpr std::string_view NAME = "K32H3L";
 
     static constexpr int NUM_SQ              = 64;
     static constexpr int NUM_PT              = 12;
@@ -249,15 +249,15 @@ struct K32H3 {
     }
 };
 
-// K32H3B: the same 3 piece-square states per king bucket as K32H3, laid out block-major:
+// K32H3: the same 3 piece-square states per king bucket as the legacy K32H3L, laid out block-major:
 // bucket = state * 32 + king_bucket, in order of increasing heavy material:
 //   state 0: no rook or queen on the board (either side),
 //   state 1: some rook or queen on the board, but the opponent of the perspective has no queen,
 //   state 2: the opponent of the perspective has a queen.
 // The state is the engine's piece-square bucket (Features::K32Q2::bucket()), so the engine offsets
 // the weights by state * 22,528 rows and indexes the block like HalfKAv2_hm.
-struct K32H3B {
-    static constexpr std::string_view NAME = "K32H3B";
+struct K32H3 {
+    static constexpr std::string_view NAME = "K32H3";
 
     static constexpr int NUM_SQ              = 64;
     static constexpr int NUM_PT              = 12;
@@ -700,16 +700,16 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<SimpleExtractor<PP_3WideT<false>>>();
     if (name == "Ram_Ram")
         return std::make_unique<SimpleExtractor<RamRamT<false>>>();
-    if (name == "K32H3")
-        return std::make_unique<SimpleExtractor<K32H3>>();
+    if (name == "K32H3L")
+        return std::make_unique<SimpleExtractor<K32H3L>>();
     if (name == "Full_Threats_hm")
         return std::make_unique<SimpleExtractor<FullThreatsT<true>>>();
     if (name == "PP_3Wide_hm")
         return std::make_unique<SimpleExtractor<PP_3WideT<true>>>();
     if (name == "Ram_Ram_hm")
         return std::make_unique<SimpleExtractor<RamRamT<true>>>();
-    if (name == "K32H3B")
-        return std::make_unique<SimpleExtractor<K32H3B>>();
+    if (name == "K32H3")
+        return std::make_unique<SimpleExtractor<K32H3>>();
     return nullptr;
 }
 
