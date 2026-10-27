@@ -98,10 +98,15 @@ class LayerStacks(nn.Module):
 
     @staticmethod
     def factor_maps(count: int, names: list[str]) -> list[torch.Tensor]:
-        """Group id of every stack (bucket = piece-count band * 4 + queen bucket) under each named factor."""
-        assert count % 4 == 0, count
+        """Group id of every stack under each named factor. bucket = (piece-count band * 4 + queen bucket) * per
+        + imbalance class, with per = 1 (32 stacks) or 3 (96 stacks, --ls-imbalance)."""
+        assert count % 32 == 0, count
+        per = count // 32
         s = torch.arange(count)
-        table = {"band": s // 4, "queen": s % 4}
+        base = s // per
+        table = {"band": base // 4, "queen": base % 4, "base": base}
+        if per > 1:
+            table["imb"] = s % per
         for n in names:
             assert n in table, f"unknown layer-stack factor {n!r} (known: {sorted(table)})"
         return [table[n] for n in names]
