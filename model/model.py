@@ -22,12 +22,21 @@ class NNUEModel(nn.Module):
         self.quantize_config = config.quantize_config
         self.quantization = QuantizationManager(config.quantize_config)
 
-        self.num_ls_buckets = 32
+        self.ls_imbalance = config.ls_imbalance
+        self.num_ls_buckets = 96 if self.ls_imbalance else 32
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
+        # Index range of the K32 piece-square component, used to read the material for --ls-imbalance
+        self.k32_range = None
+        lo = 0
+        for f in self.input.features:
+            if type(f).__name__.startswith("K32"):
+                self.k32_range = (lo, lo + f.NUM_INPUTS)
+            lo += f.NUM_INPUTS
+        assert not self.ls_imbalance or self.k32_range is not None, "--ls-imbalance needs a K32 piece-square component"
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
@@ -103,6 +112,18 @@ class NNUEModel(nn.Module):
         pc_bucket = (piece_count - 1) // 4
         return pc_bucket * 4 + queen_bucket
 
+    def imbalance_class(self, us: torch.Tensor, white_indices: torch.Tensor) -> torch.Tensor:
+        """Side to move's material balance class: 0 |d| <= 1, 1 d >= 2, 2 d <= -2 (pawn units P1 N3 B3 R5 Q9).
+        The counts come from the white perspective's K32 piece-square planes (768 rows per bucket, plane =
+        piece type * 2 + (colour is black), square-major within a plane)."""
+        lo, hi = self.k32_range
+        inr = (white_indices >= lo) & (white_indices < hi)
+        plane = torch.remainder(white_indices - lo, 768) // 64
+        value = torch.tensor([1, -1, 3, -3, 3, -3, 5, -5, 9, -9, 0, 0], device=white_indices.device)
+        d = torch.where(inr, value[plane.clamp(0, 11)], torch.zeros_like(plane)).sum(dim=1)
+        d = torch.where(us.view(-1) > 0.5, d, -d)
+        return torch.where(d.abs() <= 1, 0, torch.where(d > 0, 1, 2)).long()
+
     def forward(
         self,
         us: torch.Tensor,
@@ -115,6 +136,10 @@ class NNUEModel(nn.Module):
         fake_quantize_weights: bool = True,
     ):
         layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
+        if self.ls_imbalance:
+            layer_stack_indices = layer_stack_indices * 3 + self.imbalance_class(us, white_indices).view_as(
+                layer_stack_indices
+            )
 
         l0_ = self.forward_ft(
             us,

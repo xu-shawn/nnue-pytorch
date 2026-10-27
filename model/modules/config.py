@@ -17,3 +17,7 @@ class LayerStacksConfig:
     """Factorized layer stacks: ':'-separated factors shared by stacks with the same piece-count band ("band") or
     queen bucket ("queen"), added to every stack layer during training and folded into the stacks at export
     (the exported net is unchanged in format). Empty = off."""
+    ls_imbalance: Annotated[bool, tyro.conf.arg(name="ls-imbalance")] = False
+    """Also route the layer stacks by the side to move's material balance d (pawn units P1 N3 B3 R5 Q9) in 3
+    classes: |d| <= 1, d >= 2, d <= -2. Gives 96 stacks, bucket = (piece-count band * 4 + queen bucket) * 3 +
+    class. Needs a K32 piece-square component (the material is read from its planes)."""
