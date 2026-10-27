@@ -8,6 +8,28 @@ from .config import LayerStacksConfig
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
+# Sizes of the extra layer-stack keys (see LayerStacksConfig.ls_keys)
+STACK_KEY_STATES = {"imb3": 3, "half": 3, "offi": 2}
+
+
+def stack_keys(config) -> list[str]:
+    """The extra layer-stack keys in index order: --ls-imbalance's class first, then --ls-keys."""
+    keys = (["imb3"] if getattr(config, "ls_imbalance", False) else []) + [
+        k for k in getattr(config, "ls_keys", "").split(":") if k
+    ]
+    for k in keys:
+        assert k in STACK_KEY_STATES, f"unknown layer-stack key {k!r} (known: {sorted(STACK_KEY_STATES)})"
+    assert len(set(keys)) == len(keys), f"repeated layer-stack key in {keys}"
+    return keys
+
+
+def stack_key_radix(keys: list[str]) -> int:
+    radix = 1
+    for k in keys:
+        radix *= STACK_KEY_STATES[k]
+    return radix
+
+
 class LayerStacks(nn.Module):
     def __init__(
         self, count: int, config: LayerStacksConfig, quantization: QuantizationManager
@@ -38,7 +60,7 @@ class LayerStacks(nn.Module):
 
         factors = [f for f in getattr(config, "ls_factors", "").split(":") if f]
         if factors:
-            self.set_group_factors(self.factor_maps(count, factors))
+            self.set_group_factors(self.factor_maps(count, factors, stack_keys(config)))
 
     def forward(
         self,
@@ -97,16 +119,22 @@ class LayerStacks(nn.Module):
         return l3x_
 
     @staticmethod
-    def factor_maps(count: int, names: list[str]) -> list[torch.Tensor]:
-        """Group id of every stack under each named factor. bucket = (piece-count band * 4 + queen bucket) * per
-        + imbalance class, with per = 1 (32 stacks) or 3 (96 stacks, --ls-imbalance)."""
-        assert count % 32 == 0, count
-        per = count // 32
+    def factor_maps(count: int, names: list[str], keys: list[str] | None = None) -> list[torch.Tensor]:
+        """Group id of every stack under each named factor: "band", "queen", "base" (the 32-stack bucket) and each
+        extra key by name ("imb" is an alias of "imb3"). bucket = (piece-count band * 4 + queen bucket) * radix +
+        the mixed-radix index of the extra keys, the last varying fastest."""
+        keys = keys or []
+        per = stack_key_radix(keys)
+        assert count == 32 * per, (count, keys)
         s = torch.arange(count)
         base = s // per
         table = {"band": base // 4, "queen": base % 4, "base": base}
-        if per > 1:
-            table["imb"] = s % per
+        rest = s % per
+        for k in reversed(keys):
+            table[k] = rest % STACK_KEY_STATES[k]
+            rest = rest // STACK_KEY_STATES[k]
+        if "imb3" in table:
+            table["imb"] = table["imb3"]
         for n in names:
             assert n in table, f"unknown layer-stack factor {n!r} (known: {sorted(table)})"
         return [table[n] for n in names]

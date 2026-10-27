@@ -21,3 +21,8 @@ class LayerStacksConfig:
     """Also route the layer stacks by the side to move's material balance d (pawn units P1 N3 B3 R5 Q9) in 3
     classes: |d| <= 1, d >= 2, d <= -2. Gives 96 stacks, bucket = (piece-count band * 4 + queen bucket) * 3 +
     class. Needs a K32 piece-square component (the material is read from its planes)."""
+    ls_keys: Annotated[str, tyro.conf.arg(name="ls-keys")] = ""
+    """More layer-stack keys, ':'-separated, on top of piece-count band x queen bucket (after the --ls-imbalance
+    class if that is set; mixed radix with the last key varying fastest): "imb3" (the --ls-imbalance class, 3),
+    "half" (pawns on both board halves a-d / e-h, on one half only, or none: 3), "offi" (1 if some side has two or
+    more officers N, B, R, Q: 2). Stacks = 32 x the product of the key sizes. Needs a K32 piece-square component."""
