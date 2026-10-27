@@ -44,6 +44,10 @@ class DataloaderSkipConfig:
     """Ply soft filter control point x4."""
     ply_y4: float = 0.75
     """Ply soft filter control point y4."""
+    cell_filter: str = ""
+    """Target distribution for the last filter stage, replacing the piece-count spline (`pc_y*`): "vltc" (PV nodes
+    of VLTC self-play, by pieces x pawns x rams x king file; see data_loader/cell_targets/vltc.json) or a path to a
+    json file in that format. The stage keeps the piece-count filter's pass rate. Empty = disabled."""
 
 
 @dataclass
@@ -102,6 +106,24 @@ class CDataloaderFileStats(ctypes.Structure):
     ]
 
 
+def load_cell_target(cell_filter: str) -> list[float]:
+    """Cell weights for DataloaderSkipConfig.cell_filter: [] if disabled."""
+    if not cell_filter:
+        return []
+    import json
+    import os
+
+    path = cell_filter
+    if not path.endswith(".json"):
+        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cell_targets", cell_filter + ".json")
+    with open(path) as f:
+        table = json.load(f)
+    target = [float(x) for x in table["target"]]
+    if len(target) != table["n_cells"] or len(target) != 33 * 17 * 3 * 4:
+        raise ValueError(f"{path}: expected 6732 cells ((pieces * 17 + pawns) * 3 + rams) * 4 + king file), got {len(target)}")
+    return target
+
+
 class CDataloaderSkipConfig(ctypes.Structure):
     _fields_ = [
         ("filtered", ctypes.c_bool),
@@ -124,6 +146,8 @@ class CDataloaderSkipConfig(ctypes.Structure):
         ("ply_y3", ctypes.c_double),
         ("ply_x4", ctypes.c_double),
         ("ply_y4", ctypes.c_double),
+        ("cell_target", ctypes.POINTER(ctypes.c_double)),
+        ("cell_target_size", ctypes.c_int),
     ]
 
     def __init__(self, config: DataloaderSkipConfig):
@@ -149,6 +173,13 @@ class CDataloaderSkipConfig(ctypes.Structure):
             ply_x4=config.ply_x4,
             ply_y4=config.ply_y4,
         )
+        # Keep the table alive with this struct; the loader copies it when it builds its skip predicate.
+        target = load_cell_target(config.cell_filter)
+        self._cell_target = (ctypes.c_double * len(target))(*target) if target else None
+        self.cell_target = (
+            ctypes.cast(self._cell_target, ctypes.POINTER(ctypes.c_double)) if target else None
+        )
+        self.cell_target_size = len(target)
 
 
 class CDataloaderDDPConfig(ctypes.Structure):

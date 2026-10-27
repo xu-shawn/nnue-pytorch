@@ -1082,11 +1082,40 @@ FenBatch* FenBatchStream::next() {
     return nullptr;
 }
 
+// Cell of a position for the cell-target filter: ((pieces * 17 + pawns) * 3 + min(rams, 2)) * 4 + king file, with all
+// pieces including kings, pawns of both sides, rams = white pawns with a black pawn directly in front, and the file of
+// the side to move's king mirrored (0 a/h, 1 b/g, 2 c/f, 3 d/e).
+static int cell_filter_index(const chess::Position& pos) {
+    const int  pieces = pos.piecesBB().count();
+    const auto wp     = pos.piecesBB(chess::Piece(chess::PieceType::Pawn, chess::Color::White));
+    const auto bp     = pos.piecesBB(chess::Piece(chess::PieceType::Pawn, chess::Color::Black));
+    const int  pawns  = wp.count() + bp.count();
+    const int  rams   = std::min((wp.shiftedVertically(1) & bp).count(), 2);
+    const int  file   = static_cast<int>(chess::ordinal(pos.kingSquare(pos.sideToMove()).file()));
+    return ((pieces * 17 + pawns) * 3 + rams) * 4 + std::min(file, 7 - file);
+}
+
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
     if (!config.filtered && !config.wld_filtered && config.random_fen_skipping <= 0
-        && config.early_fen_skipping < 0 && config.soft_early_fen_skipping <= 0)
+        && config.early_fen_skipping < 0 && config.soft_early_fen_skipping <= 0
+        && config.cell_target_size <= 0)
     {
         return nullptr;
+    }
+
+    // --- Optional cell target ---
+    // When set, it replaces the piece-count spline as the target distribution of the last filter stage. The stage
+    // still accepts as many positions as the piece-count filter would on the same stream (its acceptance is computed
+    // and used as the budget), so the amount of training data per epoch and the pass rate don't change.
+    std::vector<double> cell_target;
+    if (config.cell_target != nullptr && config.cell_target_size > 0)
+    {
+        cell_target.assign(config.cell_target, config.cell_target + config.cell_target_size);
+        double total = 0.0;
+        for (double t : cell_target)
+            total += std::max(0.0, t);
+        for (double& t : cell_target)
+            t = total > 0.0 ? std::max(0.0, t) / total : 0.0;
     }
 
     double   skip_prob             = 0.0;
@@ -1196,7 +1225,8 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
     }
 
     return [config, random_skip_threshold, target_pc_weights_lut, target_pc_weights_total,
-            early_ply_accept_prob = std::move(early_ply_accept_prob)](const TrainingDataEntry& e) {
+            early_ply_accept_prob = std::move(early_ply_accept_prob),
+            cell_target           = std::move(cell_target)](const TrainingDataEntry& e) {
         static constexpr int    VALUE_NONE = 32002;
         static thread_local int last_ply   = -1;
         static thread_local int last_score = VALUE_NONE;
@@ -1319,6 +1349,67 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         }
 
         accept_prob = std::clamp(accept_prob, 0.0, 1.0);
+
+        // Cell-target filter: accept with min(1, beta * target(c) / observed share(c)), beta chosen so that the
+        // expected acceptance equals the piece-count filter's (accept_prob above, averaged over the same stream).
+        if (!cell_target.empty())
+        {
+            static thread_local std::vector<double> cell_history;
+            static thread_local double              cell_history_total = 0.0;
+            static thread_local double              budget_sum         = 0.0;
+            static thread_local double              budget_count       = 0.0;
+            static thread_local double              beta               = 1.0;
+
+            const int n = static_cast<int>(cell_target.size());
+            if (static_cast<int>(cell_history.size()) != n)
+            {
+                cell_history.assign(n, 0.0);
+                cell_history_total = budget_sum = budget_count = 0.0;
+                beta = 1.0;
+            }
+
+            const int cell = cell_filter_index(e.pos);
+            if (cell < 0 || cell >= n)
+                return true;
+
+            cell_history[cell] += 1.0;
+            cell_history_total += 1.0;
+            budget_sum += accept_prob;
+            budget_count += 1.0;
+
+            if (should_update)
+            {
+                // Expected acceptance sum_c min(s(c), beta * t(c)) is increasing in beta; solve for the budget.
+                const double budget = budget_sum / budget_count;
+                auto expected = [&](double b) {
+                    double sum = 0.0;
+                    for (int c = 0; c < n; ++c)
+                        if (cell_history[c] > 0.0)
+                            sum += std::min(cell_history[c] / cell_history_total, b * cell_target[c]);
+                    return sum;
+                };
+                double lo = 0.0, hi = 1.0;
+                while (expected(hi) < budget && hi < 1e12)
+                    hi *= 2.0;
+                for (int it = 0; it < 60; ++it)
+                {
+                    const double mid = 0.5 * (lo + hi);
+                    (expected(mid) < budget ? lo : hi) = mid;
+                }
+                beta = hi;
+
+                if (step_count >= 10000 && step_count % 10000 == 0)
+                {
+                    for (double& h : cell_history)
+                        h *= 0.5;
+                    cell_history_total *= 0.5;
+                    budget_sum *= 0.5;
+                    budget_count *= 0.5;
+                }
+            }
+
+            accept_prob = std::clamp(beta * cell_target[cell] * cell_history_total / cell_history[cell], 0.0, 1.0);
+        }
 
         uint64_t reject_threshold =
           static_cast<uint64_t>((1.0 - accept_prob) * static_cast<double>(~0ULL));
