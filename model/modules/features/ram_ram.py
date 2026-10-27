@@ -11,3 +11,16 @@ class RamRam(PP3Wide):
 
     NUM_INPUTS = 40 * 39 // 2
     NUM_REAL_FEATURES = NUM_INPUTS
+
+
+class RamPawnNear(PP3Wide):
+    """Every ram with every other pawn (either colour) on the ram's file or an adjacent file: ram id * 96 +
+    (pawn colour != perspective) * 48 + oriented square - 8 (see the loader)."""
+
+    HASH = 0x3A9E1C11
+    FEATURE_NAME = "Ram_Pawn_Near"
+    INPUT_FEATURE_NAME = "Ram_Pawn_Near"
+    MAX_ACTIVE_FEATURES = 32
+
+    NUM_INPUTS = 40 * 96
+    NUM_REAL_FEATURES = NUM_INPUTS

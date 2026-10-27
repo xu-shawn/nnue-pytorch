@@ -332,7 +332,9 @@ struct FullThreats {
     static constexpr int PIECE_NB            = 12;
     static constexpr int COLOR_NB            = 2;
     static constexpr int PIECE_TYPE_NB       = 6;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    // Real positions have at most about 52 (measured over about 870M training positions). Reserves 96 so that
+    // Full_Threats + PP_3Wide + Ram_Ram + Ram_Pawn_Near + K32H3 keeps the composite at 288.
+    static constexpr int MAX_ACTIVE_FEATURES = 96;
 
     static constexpr int INPUTS = threatfeatures;
 
@@ -650,6 +652,43 @@ struct RamRam {
     }
 };
 
+// Ram_Pawn_Near: every ram with every other pawn (either colour) on the ram's file or an adjacent file. Index:
+// ram id * 96 + (pawn colour != perspective) * 48 + oriented square of the pawn - 8, oriented like the rams
+// (Full_Threats orientation). Indices are unique: each (ram, pawn) pair appears once. The features depend only on
+// the pawns. The reservation is the measured maximum (28 over about 870M training positions) rounded up; nothing
+// is capped, since components share the composite's slots (see Full_Threats).
+struct RamPawnNear {
+    static constexpr std::string_view NAME = "Ram_Pawn_Near";
+
+    static constexpr int INPUTS              = 40 * 96;
+    static constexpr int MAX_ACTIVE_FEATURES = 32;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&               pos    = e.pos;
+        const int           orient = ram_orient(pos, color);
+        const Rams          rams(pos, orient);
+        const std::uint64_t pawns[2] = {pos.piecesBB(whitePawn).bits(), pos.piecesBB(blackPawn).bits()};
+        int                 k        = 0;
+
+        for (int i = 0; i < rams.count; ++i)
+        {
+            const int f = (rams.id[i] + 8) & 7;  // oriented file of the ram
+            for (int c = 0; c < 2; ++c)
+            {
+                const int rel = c ^ static_cast<int>(color);
+                for (Square p : Bitboard::fromBits(pawns[c] & ~rams.members[i]))
+                {
+                    const int o = static_cast<int>(p) ^ orient;
+                    if (std::abs((o & 7) - f) <= 1)
+                        features[k++] = rams.id[i] * 96 + rel * 48 + o - 8;
+                }
+            }
+        }
+        return {k, INPUTS};
+    }
+};
+
 template<typename T>
 struct SimpleExtractor: IFeatureExtractor {
     int inputs() const override { return T::INPUTS; }
@@ -677,6 +716,8 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<PP_3WideExtractor>();
     if (name == "Ram_Ram")
         return std::make_unique<SimpleExtractor<RamRam>>();
+    if (name == "Ram_Pawn_Near")
+        return std::make_unique<SimpleExtractor<RamPawnNear>>();
     if (name == "K32H3")
         return std::make_unique<SimpleExtractor<K32H3>>();
     return nullptr;

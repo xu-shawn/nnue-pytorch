@@ -8,7 +8,7 @@ class FullThreats(InputFeature):
     HASH = 0x2E6B9D04
     FEATURE_NAME = "Full_Threats"
     INPUT_FEATURE_NAME = "Full_Threats"
-    MAX_ACTIVE_FEATURES = 128
+    MAX_ACTIVE_FEATURES = 96
 
     NUM_INPUTS = 59808
     NUM_REAL_FEATURES = 59808
