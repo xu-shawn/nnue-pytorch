@@ -103,7 +103,7 @@ extern "C" __global__ void sparse_l1_forward(
 def _route_rows(indices, count):
     kernel = _route_kernels.get(count)
     if kernel is None:
-        # One thread initializes/reserves each bucket, so count must be <= 256.
+        # Threads initialize/reserve the buckets in a strided loop (count <= 1024, 8 KB of shared memory).
         # Specializing the constant preserves the original eight-bucket code.
         kernel = cp.RawKernel(
             f"#define BUCKETS {count}\n"
@@ -111,12 +111,12 @@ def _route_rows(indices, count):
 extern "C" __global__ void route(const long long* ids,int* rows,int* counts,int batch){
  __shared__ int used[BUCKETS],base[BUCKETS];
  int t=threadIdx.x,r=blockIdx.x*blockDim.x+t;
- if(t<BUCKETS)used[t]=0;
+ for(int i=t;i<BUCKETS;i+=blockDim.x)used[i]=0;
  __syncthreads();
  int b=0,pos=0;
  if(r<batch){b=ids[r];pos=atomicAdd(&used[b],1);}
  __syncthreads();
- if(t<BUCKETS)base[t]=atomicAdd(&counts[t],used[t]);
+ for(int i=t;i<BUCKETS;i+=blockDim.x)base[i]=atomicAdd(&counts[i],used[i]);
  __syncthreads();
  if(r<batch)rows[b*batch+base[b]+pos]=r;
 }
@@ -372,7 +372,7 @@ def grouped_l1_preferred(count: int) -> bool:
 
 @torch.compiler.disable
 def grouped_l1(x, weight, bias, indices, count=8):
-    """FP32 K→N linear, 1 <= N <= 128, 1 <= count <= 256; indices in [0, count).
+    """FP32 K→N linear, 1 <= N <= 128, 1 <= count <= 1024; indices in [0, count).
 
     Bucket counts stay on the GPU. Parameters and output row order are identical
     to a dense K→(count*N) linear followed by selection. First-order training only,
