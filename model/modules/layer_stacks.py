@@ -48,6 +48,8 @@ class LayerStacks(nn.Module):
         stored[live] = torch.arange(len(live))
         count = len(live)
 
+        self.raw_count = raw_count
+        self.compact = compact
         self.count = count
         self.L1 = config.L1
         self.L2 = config.L2
