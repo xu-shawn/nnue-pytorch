@@ -166,14 +166,22 @@ def prepare_stack_table(args) -> None:
         path = resolve_data_path(mc.ls_remap_data, args.datasets)
         threads = max(args.threads, args.num_workers, 1)
         counts = count_stacks(path, args.nnue_config.features, mc, threads, mc.ls_remap_positions)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            # The data loader gives each rank its own shard of the binpack: sum the shards, so that every rank
+            # builds the same table from the whole file
+            device = torch.device("cuda", torch.cuda.current_device()) if dist.get_backend() == "nccl" else "cpu"
+            total = torch.from_numpy(counts).to(device)
+            dist.all_reduce(total)
+            counts = total.cpu().numpy()
         keys = stack_keys(mc)
         remap = fallback_table(counts, keys, STACK_KEY_STATES, mc.ls_remap_min)
         mc.ls_remap_table = table_to_str(remap)
-        print(
-            f"Layer-stack table from {path}: {int(counts.sum())} positions, {len(remap)} raw stacks, "
-            f"{int((counts == 0).sum())} never seen, {sum(s != f for s, f in enumerate(remap))} remapped "
-            f"(fewer than {mc.ls_remap_min}), {sum(s == f for s, f in enumerate(remap))} stored"
-        )
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            print(
+                f"Layer-stack table from {path}: {int(counts.sum())} positions, {len(remap)} raw stacks, "
+                f"{int((counts == 0).sum())} never seen, {sum(s != f for s, f in enumerate(remap))} remapped "
+                f"(fewer than {mc.ls_remap_min}), {sum(s == f for s, f in enumerate(remap))} stored"
+            )
 
 
 def main():
