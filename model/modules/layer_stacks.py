@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -61,6 +62,26 @@ class LayerStacks(nn.Module):
         factors = [f for f in getattr(config, "ls_factors", "").split(":") if f]
         if factors:
             self.set_group_factors(self.factor_maps(count, factors, stack_keys(config)))
+
+        remap_path = getattr(config, "ls_remap", "")
+        remap = self.load_remap(remap_path, count) if remap_path else torch.arange(count)
+        self.register_buffer("stack_remap", remap, persistent=False)
+
+    @staticmethod
+    def load_remap(path: str, count: int) -> torch.Tensor:
+        """Stack -> stack actually used: identity except for the "stack fallback" lines of the file."""
+        p = Path(path)
+        if not p.is_absolute() and not p.exists():
+            p = Path(__file__).resolve().parents[2] / path
+        remap = torch.arange(count)
+        for line in p.read_text().splitlines():
+            line = line.split("#")[0].strip()
+            if line:
+                stack, fallback = (int(v) for v in line.split())
+                assert 0 <= stack < count and 0 <= fallback < count, (stack, fallback, count)
+                remap[stack] = fallback
+        assert bool((remap[remap] == remap).all()), "a fallback stack must not be remapped itself"
+        return remap
 
     def forward(
         self,
@@ -161,7 +182,8 @@ class LayerStacks(nn.Module):
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.
         for i in range(self.count):
-            yield self.l1.at_index(i), self.l2.at_index(i), self.output.at_index(i)
+            j = int(self.stack_remap[i])
+            yield self.l1.at_index(j), self.l2.at_index(j), self.output.at_index(j)
 
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(self) -> None:
