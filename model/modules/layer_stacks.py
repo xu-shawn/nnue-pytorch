@@ -37,6 +37,17 @@ class LayerStacks(nn.Module):
     ):
         super().__init__()
 
+        # count is the number of raw stacks (routing keys); self.count the number of stored stacks
+        raw_count = count
+        remap_path = getattr(config, "ls_remap", "")
+        remap = self.load_remap(remap_path, raw_count) if remap_path else torch.arange(raw_count)
+        compact = getattr(config, "ls_compact", False)
+        assert not compact or remap_path, "--ls-compact needs --ls-remap"
+        live = torch.nonzero(remap == torch.arange(raw_count)).flatten() if compact else torch.arange(raw_count)
+        stored = torch.full((raw_count,), -1, dtype=torch.long)
+        stored[live] = torch.arange(len(live))
+        count = len(live)
+
         self.count = count
         self.L1 = config.L1
         self.L2 = config.L2
@@ -61,11 +72,12 @@ class LayerStacks(nn.Module):
 
         factors = [f for f in getattr(config, "ls_factors", "").split(":") if f]
         if factors:
-            self.set_group_factors(self.factor_maps(count, factors, stack_keys(config)))
+            maps = self.factor_maps(raw_count, factors, stack_keys(config))
+            self.set_group_factors([m[live] for m in maps])
 
-        remap_path = getattr(config, "ls_remap", "")
-        remap = self.load_remap(remap_path, count) if remap_path else torch.arange(count)
-        self.register_buffer("stack_remap", remap, persistent=False)
+        # Raw stack -> stored stack used for it, and the stored stack written to each slot of the exported net
+        self.register_buffer("stack_remap", stored[remap], persistent=False)
+        self.export_slots = list(range(count)) if compact else [int(s) for s in stored[remap]]
 
     @staticmethod
     def load_remap(path: str, count: int) -> torch.Tensor:
@@ -181,8 +193,7 @@ class LayerStacks(nn.Module):
         # During training the buckets are represented by a single, wider, layer.
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.
-        for i in range(self.count):
-            j = int(self.stack_remap[i])
+        for j in self.export_slots:
             yield self.l1.at_index(j), self.l2.at_index(j), self.output.at_index(j)
 
     @torch.no_grad()

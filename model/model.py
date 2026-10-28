@@ -25,7 +25,6 @@ class NNUEModel(nn.Module):
 
         self.ls_keys = stack_keys(config)
         self.ls_key_radix = stack_key_radix(self.ls_keys)
-        self.num_ls_buckets = 32 * self.ls_key_radix
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
@@ -39,7 +38,9 @@ class NNUEModel(nn.Module):
                 self.k32_range = (lo, lo + f.NUM_INPUTS)
             lo += f.NUM_INPUTS
         assert not self.ls_keys or self.k32_range is not None, "--ls-imbalance / --ls-keys need a K32 piece-square component"
-        self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
+        self.layer_stacks = LayerStacks(32 * self.ls_key_radix, config, self.quantization)
+        # Stacks stored in the net (fewer than the raw stacks with --ls-compact)
+        self.num_ls_buckets = self.layer_stacks.count
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
