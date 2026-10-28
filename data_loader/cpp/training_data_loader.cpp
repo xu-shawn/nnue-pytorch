@@ -295,9 +295,10 @@ struct FullThreats {
 struct PP_3Wide {
     static constexpr std::string_view NAME = "PP_3Wide";
 
-    static constexpr int PAWN_IDS            = 2 * 48;
-    static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int PAWN_IDS = 2 * 48;
+    static constexpr int INPUTS   = PAWN_IDS * (PAWN_IDS - 1) / 2;
+    // Real positions have at most about 40; 100 keeps Full_Threats + PP_3Wide + Ram_Ram + K32H3 at 288
+    static constexpr int MAX_ACTIVE_FEATURES = 100;
 
     static int make_pawn_id(Color color, Square square) {
         return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
@@ -405,6 +406,38 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
     }
 };
 
+// Every pair of rams on the board (a ram is a pawn blocked head-on by an enemy pawn), by both ram ids:
+// the oriented square of the ram's lower pawn (ranks 2-6), oriented like the threat inputs. These change
+// only when a ram forms or breaks.
+struct RamRam {
+    static constexpr std::string_view NAME = "Ram_Ram";
+
+    static constexpr int INPUTS              = 40 * 39 / 2;
+    static constexpr int MAX_ACTIVE_FEATURES = 8 * 7 / 2;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&     pos    = e.pos;
+        const int orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+        const std::uint64_t white = pos.piecesBB(whitePawn).bits(), black = pos.piecesBB(blackPawn).bits();
+
+        int ids[8], n = 0;
+        for (Square w : Bitboard::fromBits(white & (black >> 8)))
+        {
+            const int a = static_cast<int>(w) ^ orient, b = (static_cast<int>(w) + 8) ^ orient;
+            ids[n++]    = std::min(a, b) - 8;
+        }
+
+        int k = 0;
+        for (int i = 0; i < n; ++i)
+            for (int j = 0; j < n; ++j)
+                if (ids[i] < ids[j])
+                    features[k++] = ids[j] * (ids[j] - 1) / 2 + ids[i];
+        return {k, INPUTS};
+    }
+};
+
 template<typename T>
 struct SimpleExtractor: IFeatureExtractor {
     int inputs() const override { return T::INPUTS; }
@@ -418,6 +451,8 @@ struct SimpleExtractor: IFeatureExtractor {
 static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view name) {
     if (name == "Full_Threats")
         return std::make_unique<SimpleExtractor<FullThreats>>();
+    if (name == "Ram_Ram")
+        return std::make_unique<SimpleExtractor<RamRam>>();
     if (name == "PP_3Wide")
         return std::make_unique<SimpleExtractor<PP_3Wide>>();
     if (name == "K32H3")
