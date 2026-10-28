@@ -1,4 +1,5 @@
 import operator
+from dataclasses import replace
 import struct
 from collections.abc import Sequence
 from functools import reduce
@@ -10,6 +11,7 @@ import torch
 from torch import nn
 
 from ..config import ModelConfig
+from ..modules.stack_table import table_to_str
 from ..model import NNUEModel
 
 
@@ -96,15 +98,17 @@ class NNUEWriter:
         self.buf = bytearray()
         self.write_header(model, fc_hash ^ (STACK_TABLE_HASH if layer_stacks.compact else 0), description)
 
-        # 2. Payload (Feature Transformer + layer-stack table + Layer Stacks)
-        self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
-        self.write_feature_transformer(model)
+        # 2. Layer-stack table: marker, raw buckets, stored stacks, then the raw bucket whose stack each raw bucket
+        #    uses. Stored stacks are the raw buckets that use their own, in raw order.
         if layer_stacks.compact:
-            # marker, raw buckets, stored stacks, then the stored stack of each raw bucket
             self.int32(STACK_TABLE_HASH)
             self.int32(layer_stacks.raw_count)
             self.int32(layer_stacks.count)
-            self.buf.extend(struct.pack(f"<{layer_stacks.raw_count}H", *layer_stacks.stack_remap.tolist()))
+            self.buf.extend(struct.pack(f"<{layer_stacks.raw_count}H", *layer_stacks.stack_fallback.tolist()))
+
+        # 3. Payload (Feature Transformer + Layer Stacks)
+        self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
+        self.write_feature_transformer(model)
         for bucket, (l1, l2, output) in enumerate(
             layer_stacks.get_coalesced_layer_stacks()
         ):
@@ -226,25 +230,36 @@ class NNUEReader:
     ):
         self.f = f
         self.feature_name = feature_name
+
+        # Header, then (compact nets) the layer-stack table, which sizes the model's stacks
+        self.read_int32(VERSION)
+        header_hash = self.read_int32()
+        desc_len = self.read_int32()
+        self.description = self.f.read(desc_len).decode("utf-8")
+        if config.ls_compact:
+            self.read_int32(STACK_TABLE_HASH)
+            raw_count = self.read_int32()
+            stored_count = self.read_int32()
+            remap = list(struct.unpack(f"<{raw_count}H", self.f.read(2 * raw_count)))
+            assert all(f < raw_count and remap[f] == f for f in remap), "invalid layer-stack table"
+            assert sum(s == f for s, f in enumerate(remap)) == stored_count, "layer-stack table count mismatch"
+            config = replace(config, ls_remap_table=table_to_str(remap))
+
         self.model = NNUEModel(feature_name, config)
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
-
         ls = self.model.layer_stacks
-        self.read_header(self.model.feature_hash, fc_hash ^ (STACK_TABLE_HASH if ls.compact else 0))
+        expected = fc_hash ^ self.model.feature_hash ^ (self.config.L1 * 2) ^ (STACK_TABLE_HASH if ls.compact else 0)
+        if header_hash != expected:
+            raise ValueError(f"Expected: {expected:x}, got: {header_hash:x}")
+        if ls.compact:
+            assert ls.count == stored_count and ls.raw_count == raw_count, (ls.count, stored_count)
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.model.zero_virtual_weights()
 
         self.read_feature_transformer(self.model.input)
-        if ls.compact:
-            self.read_int32(STACK_TABLE_HASH)
-            self.read_int32(ls.raw_count)
-            self.read_int32(ls.count)
-            table = torch.tensor(struct.unpack(f"<{ls.raw_count}H", self.f.read(2 * ls.raw_count)))
-            assert bool((table < ls.count).all()), "layer-stack table entry out of range"
-            ls.stack_remap.copy_(table)  # the net's table routes the model's evaluations
 
         layers = [
             self.model.layer_stacks.l1,

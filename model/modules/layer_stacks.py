@@ -6,6 +6,7 @@ from torch import nn
 
 from ..quantize import QuantizationManager
 from .config import LayerStacksConfig
+from .stack_table import table_from_str
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
@@ -40,9 +41,17 @@ class LayerStacks(nn.Module):
         # count is the number of raw stacks (routing keys); self.count the number of stored stacks
         raw_count = count
         remap_path = getattr(config, "ls_remap", "")
-        remap = self.load_remap(remap_path, raw_count) if remap_path else torch.arange(raw_count)
+        remap_table = getattr(config, "ls_remap_table", "")
+        if remap_table:
+            remap = torch.tensor(table_from_str(remap_table, raw_count))
+            assert bool((remap[remap] == remap).all()), "a fallback stack must not be remapped itself"
+        else:
+            remap = self.load_remap(remap_path, raw_count) if remap_path else torch.arange(raw_count)
         compact = getattr(config, "ls_compact", False)
-        assert not compact or remap_path, "--ls-compact needs --ls-remap"
+        assert not compact or remap_table or remap_path, (
+            "--ls-compact needs a remap table: --ls-remap, or --ls-remap-data at the start of training (later steps "
+            "take it from the checkpoint or the net)"
+        )
         live = torch.nonzero(remap == torch.arange(raw_count)).flatten() if compact else torch.arange(raw_count)
         stored = torch.full((raw_count,), -1, dtype=torch.long)
         stored[live] = torch.arange(len(live))
@@ -77,8 +86,10 @@ class LayerStacks(nn.Module):
             maps = self.factor_maps(raw_count, factors, stack_keys(config))
             self.set_group_factors([m[live] for m in maps])
 
-        # Raw stack -> stored stack used for it, and the stored stack written to each slot of the exported net
+        # Raw stack -> stored stack used for it, and the stored stack written to each slot of the exported net.
+        # stack_fallback (raw -> raw fallback) is saved in checkpoints so later steps rebuild the same table.
         self.register_buffer("stack_remap", stored[remap], persistent=False)
+        self.register_buffer("stack_fallback", remap.clone(), persistent=compact)
         self.export_slots = list(range(count)) if compact else [int(s) for s in stored[remap]]
 
     @staticmethod

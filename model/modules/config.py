@@ -31,6 +31,18 @@ class LayerStacksConfig:
     against the trainer directory). Listed stacks are routed to their fallback in training and exported as copies
     of it, so stacks without training data never reach the engine. The exported net format is unchanged. Empty =
     off."""
+    ls_remap_data: Annotated[str, tyro.conf.arg(name="ls-remap-data")] = ""
+    """Binpack to build the remap table from at the start of training (instead of --ls-remap): every stack is
+    counted over it (no position filtering), and stacks seen fewer than --ls-remap-min times are routed to the
+    nearest well-seen stack. A relative path is also looked up under the data root of the training binpacks.
+    The table is kept in the checkpoint and the net, so later steps (resume, conversion, crosscheck) reuse it."""
+    ls_remap_min: Annotated[int, tyro.conf.arg(name="ls-remap-min")] = 50
+    """Minimum count for a stack of its own with --ls-remap-data."""
+    ls_remap_positions: Annotated[int, tyro.conf.arg(name="ls-remap-positions")] = 0
+    """Count at most this many positions of --ls-remap-data (0 = all)."""
+    ls_remap_table: Annotated[str, tyro.conf.arg(name="ls-remap-table")] = ""
+    """The remap table itself, as "stack:fallback" pairs (normally filled in from --ls-remap-data, a checkpoint or
+    a net); takes precedence over --ls-remap."""
     ls_compact: Annotated[bool, tyro.conf.arg(name="ls-compact")] = False
     """With --ls-remap: store and export only the stacks that are their own fallback, in stack order. The net then
     has fewer layer stacks, and the engine maps raw stacks to stored ones with the same table."""
