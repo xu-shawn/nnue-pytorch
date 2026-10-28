@@ -31,3 +31,6 @@ class LayerStacksConfig:
     against the trainer directory). Listed stacks are routed to their fallback in training and exported as copies
     of it, so stacks without training data never reach the engine. The exported net format is unchanged. Empty =
     off."""
+    ls_compact: Annotated[bool, tyro.conf.arg(name="ls-compact")] = False
+    """With --ls-remap: store and export only the stacks that are their own fallback, in stack order. The net then
+    has fewer layer stacks, and the engine maps raw stacks to stored ones with the same table."""
