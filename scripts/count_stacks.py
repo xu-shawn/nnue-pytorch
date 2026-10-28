@@ -4,15 +4,14 @@ routing code (calculate_buckets + stack_key_index). usage: count_stacks.py <binp
 import os, sys
 from pathlib import Path
 import numpy as np
-binpack_arg = os.path.abspath(sys.argv[1])
+binpack_arg, out_arg = os.path.abspath(sys.argv[1]), os.path.abspath(sys.argv[4])
 os.chdir(Path(__file__).resolve().parents[1]); sys.path.insert(0, ".")
 import torch
 from data_loader.config import DataloaderSkipConfig
 from data_loader.stream import create_sparse_batch_stream, fetch_next_sparse_batch, destroy_sparse_batch, destroy_sparse_batch_stream
 from model.config import ModelConfig
 from model.model import NNUEModel
-binpack, keys, feats, out = binpack_arg, *sys.argv[2:5]
-out = os.path.abspath(out) if not os.path.isabs(out) else out
+binpack, keys, feats, out = binpack_arg, sys.argv[2], sys.argv[3], out_arg
 m = NNUEModel(feats, ModelConfig(L1=256, ls_keys=keys))
 raw_mode = len(sys.argv) > 5 and sys.argv[5] == "raw"
 cfg = DataloaderSkipConfig(filtered=False, wld_filtered=False, random_fen_skipping=0, early_fen_skipping=-1,
