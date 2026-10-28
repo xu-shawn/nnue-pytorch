@@ -39,7 +39,7 @@ class LayerStacksConfig:
     ls_remap_min: Annotated[int, tyro.conf.arg(name="ls-remap-min")] = 50
     """Minimum count for a stack of its own with --ls-remap-data."""
     ls_remap_positions: Annotated[int, tyro.conf.arg(name="ls-remap-positions")] = 0
-    """Count at most this many positions of --ls-remap-data (0 = all)."""
+    """Count at most this many positions of --ls-remap-data per data-loader shard (0 = all)."""
     ls_remap_table: Annotated[str, tyro.conf.arg(name="ls-remap-table")] = ""
     """The remap table itself, as "stack:fallback" pairs (normally filled in from --ls-remap-data, a checkpoint or
     a net); takes precedence over --ls-remap."""
