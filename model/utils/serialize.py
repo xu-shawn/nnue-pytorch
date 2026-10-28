@@ -68,6 +68,10 @@ VERSION = 0x6A448AFA
 DEFAULT_DESCRIPTION = "Network trained with the https://github.com/official-stockfish/nnue-pytorch trainer."
 
 
+# Marks nets with a layer-stack table (raw bucket -> stored stack) after the feature transformer
+STACK_TABLE_HASH = 0x5A7AB1E5
+
+
 class NNUEWriter:
     """
     All values are stored in little endian.
@@ -86,14 +90,21 @@ class NNUEWriter:
 
         fc_hash = self.fc_hash(model)
 
-        # 1. Plaintext header
-        self.buf = bytearray()
-        self.write_header(model, fc_hash, description)
+        layer_stacks = model.layer_stacks
 
-        # 2. Payload (Feature Transformer + Layer Stacks)
+        # 1. Plaintext header (nets with a layer-stack table carry its marker in the network hash)
+        self.buf = bytearray()
+        self.write_header(model, fc_hash ^ (STACK_TABLE_HASH if layer_stacks.compact else 0), description)
+
+        # 2. Payload (Feature Transformer + layer-stack table + Layer Stacks)
         self.int32(model.feature_hash ^ (model.L1 * 2))  # Feature transformer hash
         self.write_feature_transformer(model)
-        layer_stacks = model.layer_stacks
+        if layer_stacks.compact:
+            # marker, raw buckets, stored stacks, then the stored stack of each raw bucket
+            self.int32(STACK_TABLE_HASH)
+            self.int32(layer_stacks.raw_count)
+            self.int32(layer_stacks.count)
+            self.buf.extend(struct.pack(f"<{layer_stacks.raw_count}H", *layer_stacks.stack_remap.tolist()))
         for bucket, (l1, l2, output) in enumerate(
             layer_stacks.get_coalesced_layer_stacks()
         ):
@@ -219,13 +230,21 @@ class NNUEReader:
         self.config = config
         fc_hash = NNUEWriter.fc_hash(self.model)
 
-        self.read_header(self.model.feature_hash, fc_hash)
+        ls = self.model.layer_stacks
+        self.read_header(self.model.feature_hash, fc_hash ^ (STACK_TABLE_HASH if ls.compact else 0))
         self.read_int32(
             self.model.feature_hash ^ (self.config.L1 * 2)
         )  # Feature transformer hash
         self.model.zero_virtual_weights()
 
         self.read_feature_transformer(self.model.input)
+        if ls.compact:
+            self.read_int32(STACK_TABLE_HASH)
+            self.read_int32(ls.raw_count)
+            self.read_int32(ls.count)
+            table = torch.tensor(struct.unpack(f"<{ls.raw_count}H", self.f.read(2 * ls.raw_count)))
+            assert bool((table < ls.count).all()), "layer-stack table entry out of range"
+            ls.stack_remap.copy_(table)  # the net's table routes the model's evaluations
 
         layers = [
             self.model.layer_stacks.l1,
