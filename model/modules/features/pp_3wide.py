@@ -8,7 +8,8 @@ class PP3Wide(InputFeature):
     HASH = 0x5C80FA69
     FEATURE_NAME = "PP_3Wide"
     INPUT_FEATURE_NAME = "PP_3Wide"
-    MAX_ACTIVE_FEATURES = 128
+    # Real positions have at most about 40; 100 keeps Full_Threats + PP_3Wide + Ram_Ram + K32H3 at 288
+    MAX_ACTIVE_FEATURES = 100
 
     NUM_INPUTS = 4560
     NUM_REAL_FEATURES = 4560
