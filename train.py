@@ -163,7 +163,8 @@ def prepare_stack_table(args) -> None:
             return
     if mc.ls_remap_data:
         path = resolve_data_path(mc.ls_remap_data, args.datasets)
-        counts = count_stacks(path, args.nnue_config.features, mc, args.threads, mc.ls_remap_positions)
+        threads = max(args.threads, args.num_workers, 1)
+        counts = count_stacks(path, args.nnue_config.features, mc, threads, mc.ls_remap_positions)
         keys = stack_keys(mc)
         remap = fallback_table(counts, keys, STACK_KEY_STATES, mc.ls_remap_min)
         mc.ls_remap_table = table_to_str(remap)
