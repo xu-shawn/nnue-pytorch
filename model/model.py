@@ -173,6 +173,7 @@ class NNUEModel(nn.Module):
             layer_stack_indices = layer_stack_indices * self.ls_key_radix + self.stack_key_index(
                 us, white_indices
             ).view_as(layer_stack_indices)
+        layer_stack_indices = self.layer_stacks.stack_remap[layer_stack_indices]
 
         l0_ = self.forward_ft(
             us,

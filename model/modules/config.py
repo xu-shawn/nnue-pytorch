@@ -26,3 +26,8 @@ class LayerStacksConfig:
     class if that is set; mixed radix with the last key varying fastest): "imb3" (the --ls-imbalance class, 3),
     "half" (pawns on both board halves a-d / e-h, on one half only, or none: 3), "offi" (1 if some side has two or
     more officers N, B, R, Q: 2). Stacks = 32 x the product of the key sizes. Needs a K32 piece-square component."""
+    ls_remap: Annotated[str, tyro.conf.arg(name="ls-remap")] = ""
+    """File of "stack fallback" lines (a relative path that does not exist from the working directory resolves
+    against the trainer directory). Listed stacks are routed to their fallback in training and exported as copies
+    of it, so stacks without training data never reach the engine. The exported net format is unchanged. Empty =
+    off."""
