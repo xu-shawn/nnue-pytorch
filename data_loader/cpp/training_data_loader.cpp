@@ -820,6 +820,84 @@ struct PasserK32H3 {
     }
 };
 
+// Pawn-state planes by king bucket. Rammed pawn: a pawn with an enemy pawn directly in front. Passed pawn: no enemy
+// pawn ahead on its own or an adjacent file. A pawn is never both. Both families use the perspective's plain K32 king
+// bucket (no heavy-piece split, to keep the engine table small), the pawn's colour and its oriented square.
+namespace pawn_state {
+inline int king_bucket(const Position& pos, Color color) {
+    const auto ksq = pos.kingSquare(color);
+    return K32Q2::KingBuckets[static_cast<int>(orient_flip_2(color, ksq, ksq))];
+}
+inline void rammed(const Position& pos, std::uint64_t out[2]) {
+    const std::uint64_t wp = pos.piecesBB(Piece(PieceType::Pawn, Color::White)).bits();
+    const std::uint64_t bp = pos.piecesBB(Piece(PieceType::Pawn, Color::Black)).bits();
+    out[0] = wp & (bp >> 8);
+    out[1] = bp & (wp << 8);
+}
+inline void passed(const Position& pos, std::uint64_t out[2]) {
+    constexpr std::uint64_t fileA = 0x0101010101010101ULL, fileH = 0x8080808080808080ULL;
+    auto widen = [](std::uint64_t b) { return b | ((b & ~fileH) << 1) | ((b & ~fileA) >> 1); };
+    const std::uint64_t wp = pos.piecesBB(Piece(PieceType::Pawn, Color::White)).bits();
+    const std::uint64_t bp = pos.piecesBB(Piece(PieceType::Pawn, Color::Black)).bits();
+    std::uint64_t south = 0, north = 0, t = bp, u = wp;
+    for (int i = 0; i < 7; ++i)
+    {
+        t >>= 8, u <<= 8;
+        south |= t, north |= u;
+    }
+    out[0] = wp & ~widen(south);
+    out[1] = bp & ~widen(north);
+}
+}  // namespace pawn_state
+
+// Ram_K32: every rammed pawn; index = king bucket * 96 + (pawn colour != perspective) * 48 + oriented square - 8.
+struct RamK32 {
+    static constexpr std::string_view NAME = "Ram_K32";
+
+    static constexpr int INPUTS              = 32 * 96;
+    static constexpr int MAX_ACTIVE_FEATURES = 24;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos = e.pos;
+        const auto ksq = pos.kingSquare(color);
+        const int  kb  = pawn_state::king_bucket(pos, color);
+        std::uint64_t rammed[2];
+        pawn_state::rammed(pos, rammed);
+        int k = 0;
+        for (Color c : {Color::White, Color::Black})
+            for (Square sq : Bitboard::fromBits(rammed[c == Color::White ? 0 : 1]))
+                features[k++] = kb * 96 + (c != color) * 48 + static_cast<int>(orient_flip_2(color, sq, ksq)) - 8;
+        return {k, INPUTS};
+    }
+};
+
+// PawnStatus_K32: rammed and passed pawns in one family (the "pawn status" fold); index = king bucket * 192
+// + status (0 passed, 1 rammed) * 96 + (pawn colour != perspective) * 48 + oriented square - 8. At most 16 active.
+struct PawnStatusK32 {
+    static constexpr std::string_view NAME = "PawnStatus_K32";
+
+    static constexpr int INPUTS              = 32 * 192;
+    static constexpr int MAX_ACTIVE_FEATURES = 24;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&      pos = e.pos;
+        const auto ksq = pos.kingSquare(color);
+        const int  kb  = pawn_state::king_bucket(pos, color);
+        std::uint64_t st[2][2];
+        pawn_state::passed(pos, st[0]);
+        pawn_state::rammed(pos, st[1]);
+        int k = 0;
+        for (int status = 0; status < 2; ++status)
+            for (Color c : {Color::White, Color::Black})
+                for (Square sq : Bitboard::fromBits(st[status][c == Color::White ? 0 : 1]))
+                    features[k++] = kb * 192 + status * 96 + (c != color) * 48
+                                  + static_cast<int>(orient_flip_2(color, sq, ksq)) - 8;
+        return {k, INPUTS};
+    }
+};
+
 struct Pad24 {
     static constexpr std::string_view NAME = "Pad24";
 
@@ -870,6 +948,10 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<SimpleExtractor<K32H5M>>();
     if (name == "Passer_K32H3")
         return std::make_unique<SimpleExtractor<PasserK32H3>>();
+    if (name == "Ram_K32")
+        return std::make_unique<SimpleExtractor<RamK32>>();
+    if (name == "PawnStatus_K32")
+        return std::make_unique<SimpleExtractor<PawnStatusK32>>();
     return nullptr;
 }
 

@@ -60,3 +60,29 @@ class PasserK32H3(PP3Wide):
 
     NUM_INPUTS = 96 * 96
     NUM_REAL_FEATURES = NUM_INPUTS
+
+
+class RamK32(PP3Wide):
+    """Every rammed pawn (enemy pawn directly in front), by the perspective's plain K32 king bucket, pawn colour and
+    oriented square: king bucket * 96 + (pawn colour != perspective) * 48 + oriented square - 8 (see the loader)."""
+
+    HASH = 0x58310186
+    FEATURE_NAME = "Ram_K32"
+    INPUT_FEATURE_NAME = "Ram_K32"
+    MAX_ACTIVE_FEATURES = 24
+
+    NUM_INPUTS = 32 * 96
+    NUM_REAL_FEATURES = NUM_INPUTS
+
+
+class PawnStatusK32(PP3Wide):
+    """Passed and rammed pawns in one family, by plain K32 king bucket: king bucket * 192 + status (0 passed,
+    1 rammed) * 96 + (pawn colour != perspective) * 48 + oriented square - 8 (see the loader)."""
+
+    HASH = 0xBA2FD043
+    FEATURE_NAME = "PawnStatus_K32"
+    INPUT_FEATURE_NAME = "PawnStatus_K32"
+    MAX_ACTIVE_FEATURES = 24
+
+    NUM_INPUTS = 32 * 192
+    NUM_REAL_FEATURES = NUM_INPUTS
