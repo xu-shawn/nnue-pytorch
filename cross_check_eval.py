@@ -450,6 +450,7 @@ def main():
         checkpoint = torch.load(
             cross_check_config.checkpoint, map_location="cpu", weights_only=False
         )
+        M.use_checkpoint_stack_table(nnue_config, checkpoint)
         ckpt = M.NNUE(config=nnue_config)
         ckpt.load_state_dict(checkpoint["state_dict"])
         ckpt.to(cross_check_config.device)

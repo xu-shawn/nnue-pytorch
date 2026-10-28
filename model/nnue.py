@@ -208,6 +208,13 @@ class NNUE(nn.Module):
             },
         ]
 
+        # Layer-stack group factors (--ls-factors): weights decayed like the l1 factorizer, biases without decay.
+        gfw = self.model.layer_stacks.group_factor_params(biases=False)
+        gfb = self.model.layer_stacks.group_factor_params(biases=True)
+        if gfw:
+            train_params.append({"params": gfw, "lr": LRs[2], "weight_decay": factorized_wd})
+            train_params.append({"params": gfb, "lr": LRs[3], "weight_decay": 0.0})
+
         train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)

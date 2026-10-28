@@ -1,11 +1,35 @@
 from collections.abc import Generator
+from pathlib import Path
 
 import torch
 from torch import nn
 
 from ..quantize import QuantizationManager
 from .config import LayerStacksConfig
+from .stack_table import table_from_str
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
+
+
+# Sizes of the extra layer-stack keys (see LayerStacksConfig.ls_keys)
+STACK_KEY_STATES = {"imb3": 3, "half": 3, "offi": 2}
+
+
+def stack_keys(config) -> list[str]:
+    """The extra layer-stack keys in index order: --ls-imbalance's class first, then --ls-keys."""
+    keys = (["imb3"] if getattr(config, "ls_imbalance", False) else []) + [
+        k for k in getattr(config, "ls_keys", "").split(":") if k
+    ]
+    for k in keys:
+        assert k in STACK_KEY_STATES, f"unknown layer-stack key {k!r} (known: {sorted(STACK_KEY_STATES)})"
+    assert len(set(keys)) == len(keys), f"repeated layer-stack key in {keys}"
+    return keys
+
+
+def stack_key_radix(keys: list[str]) -> int:
+    radix = 1
+    for k in keys:
+        radix *= STACK_KEY_STATES[k]
+    return radix
 
 
 class LayerStacks(nn.Module):
@@ -14,6 +38,27 @@ class LayerStacks(nn.Module):
     ):
         super().__init__()
 
+        # count is the number of raw stacks (routing keys); self.count the number of stored stacks
+        raw_count = count
+        remap_path = getattr(config, "ls_remap", "")
+        remap_table = getattr(config, "ls_remap_table", "")
+        if remap_table:
+            remap = torch.tensor(table_from_str(remap_table, raw_count))
+            assert bool((remap[remap] == remap).all()), "a fallback stack must not be remapped itself"
+        else:
+            remap = self.load_remap(remap_path, raw_count) if remap_path else torch.arange(raw_count)
+        compact = getattr(config, "ls_compact", False)
+        assert not compact or remap_table or remap_path, (
+            "--ls-compact needs a remap table: --ls-remap, or --ls-remap-data at the start of training (later steps "
+            "take it from the checkpoint or the net)"
+        )
+        live = torch.nonzero(remap == torch.arange(raw_count)).flatten() if compact else torch.arange(raw_count)
+        stored = torch.full((raw_count,), -1, dtype=torch.long)
+        stored[live] = torch.arange(len(live))
+        count = len(live)
+
+        self.raw_count = raw_count
+        self.compact = compact
         self.count = count
         self.L1 = config.L1
         self.L2 = config.L2
@@ -35,6 +80,33 @@ class LayerStacks(nn.Module):
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
+
+        factors = [f for f in getattr(config, "ls_factors", "").split(":") if f]
+        if factors:
+            maps = self.factor_maps(raw_count, factors, stack_keys(config))
+            self.set_group_factors([m[live] for m in maps])
+
+        # Raw stack -> stored stack used for it, and the stored stack written to each slot of the exported net.
+        # stack_fallback (raw -> raw fallback) is saved in checkpoints so later steps rebuild the same table.
+        self.register_buffer("stack_remap", stored[remap], persistent=False)
+        self.register_buffer("stack_fallback", remap.clone(), persistent=compact)
+        self.export_slots = list(range(count)) if compact else [int(s) for s in stored[remap]]
+
+    @staticmethod
+    def load_remap(path: str, count: int) -> torch.Tensor:
+        """Stack -> stack actually used: identity except for the "stack fallback" lines of the file."""
+        p = Path(path)
+        if not p.is_absolute() and not p.exists():
+            p = Path(__file__).resolve().parents[2] / path
+        remap = torch.arange(count)
+        for line in p.read_text().splitlines():
+            line = line.split("#")[0].strip()
+            if line:
+                stack, fallback = (int(v) for v in line.split())
+                assert 0 <= stack < count and 0 <= fallback < count, (stack, fallback, count)
+                remap[stack] = fallback
+        assert bool((remap[remap] == remap).all()), "a fallback stack must not be remapped itself"
+        return remap
 
     def forward(
         self,
@@ -92,6 +164,37 @@ class LayerStacks(nn.Module):
         )
         return l3x_
 
+    @staticmethod
+    def factor_maps(count: int, names: list[str], keys: list[str] | None = None) -> list[torch.Tensor]:
+        """Group id of every stack under each named factor: "band", "queen", "base" (the 32-stack bucket) and each
+        extra key by name ("imb" is an alias of "imb3"). bucket = (piece-count band * 4 + queen bucket) * radix +
+        the mixed-radix index of the extra keys, the last varying fastest."""
+        keys = keys or []
+        per = stack_key_radix(keys)
+        assert count == 32 * per, (count, keys)
+        s = torch.arange(count)
+        base = s // per
+        table = {"band": base // 4, "queen": base % 4, "base": base}
+        rest = s % per
+        for k in reversed(keys):
+            table[k] = rest % STACK_KEY_STATES[k]
+            rest = rest // STACK_KEY_STATES[k]
+        if "imb3" in table:
+            table["imb"] = table["imb3"]
+        for n in names:
+            assert n in table, f"unknown layer-stack factor {n!r} (known: {sorted(table)})"
+        return [table[n] for n in names]
+
+    def set_group_factors(self, maps: list[torch.Tensor]) -> None:
+        for layer in (self.l1, self.l2, self.output):
+            layer.set_group_factors(maps)
+
+    def group_factor_params(self, biases: bool) -> list:
+        out = []
+        for layer in (self.l1, self.l2, self.output):
+            out += list(layer.group_factor_b if biases else layer.group_factor_w)
+        return out
+
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
         self.l1.zero_virtual_weights()
@@ -103,9 +206,11 @@ class LayerStacks(nn.Module):
         # During training the buckets are represented by a single, wider, layer.
         # This representation needs to be transformed into individual layers
         # for the serializer, because the buckets are interpreted as separate layers.
-        for i in range(self.count):
-            yield self.l1.at_index(i), self.l2.at_index(i), self.output.at_index(i)
+        for j in self.export_slots:
+            yield self.l1.at_index(j), self.l2.at_index(j), self.output.at_index(j)
 
     @torch.no_grad()
     def coalesce_layer_stacks_inplace(self) -> None:
         self.l1.coalesce_weights()
+        self.l2.coalesce_group_factors()
+        self.output.coalesce_group_factors()

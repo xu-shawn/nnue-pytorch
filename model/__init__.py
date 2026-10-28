@@ -1,5 +1,6 @@
 from .config import LossParams, ModelConfig, NNUEConfig
 from .model import NNUEModel
+from .modules.stack_table import use_checkpoint_stack_table
 from .modules import (
     FeatureConfig,
     LayerStacksConfig,
@@ -38,6 +39,7 @@ __all__ = [
     "NNUEConfig",
     "NNUEModel",
     "NNUEReader",
+    "use_checkpoint_stack_table",
     "NNUEWriter",
     "OptimizerConfig",
     "QuantizationConfig",
