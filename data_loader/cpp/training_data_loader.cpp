@@ -295,9 +295,8 @@ struct FullThreats {
 struct PP_3Wide {
     static constexpr std::string_view NAME = "PP_3Wide";
 
-    static constexpr int PAWN_IDS = 2 * 48;
-    static constexpr int INPUTS   = PAWN_IDS * (PAWN_IDS - 1) / 2;
-    // Real positions have at most about 40; 100 keeps Full_Threats + PP_3Wide + Ram_Ram + K32H3 at 288
+    static constexpr int PAWN_IDS            = 2 * 48;
+    static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
     static constexpr int MAX_ACTIVE_FEATURES = 100;
 
     static int make_pawn_id(Color color, Square square) {
@@ -407,8 +406,7 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
 };
 
 // Every pair of rams on the board (a ram is a pawn blocked head-on by an enemy pawn), by both ram ids:
-// the oriented square of the ram's lower pawn (ranks 2-6), oriented like the threat inputs. These change
-// only when a ram forms or breaks.
+// the oriented square of the ram's lower pawn (ranks 2-6). These change only when a ram forms or breaks.
 struct RamRam {
     static constexpr std::string_view NAME = "Ram_Ram";
 
@@ -420,13 +418,14 @@ struct RamRam {
         auto&     pos    = e.pos;
         const int orient = static_cast<int>(
           FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
-        const std::uint64_t white = pos.piecesBB(whitePawn).bits(), black = pos.piecesBB(blackPawn).bits();
+        const std::uint64_t white = pos.piecesBB(whitePawn).bits(),
+                            black = pos.piecesBB(blackPawn).bits();
 
         int ids[8], n = 0;
         for (Square w : Bitboard::fromBits(white & (black >> 8)))
         {
             const int a = static_cast<int>(w) ^ orient, b = (static_cast<int>(w) + 8) ^ orient;
-            ids[n++]    = std::min(a, b) - 8;
+            ids[n++] = std::min(a, b) - 8;
         }
 
         int k = 0;
