@@ -489,7 +489,7 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 }
 
 // Piece-count band: (pieces - 1) / 4
-static int piece_band(const Position& pos) { return (pos.piecesBB().count() - 1) / 4; }
+static int piece_count(const Position& pos) { return (pos.piecesBB().count() - 1) / 4; }
 
 // 2 if the side to move has a queen, plus 1 if the opponent has one
 static int queens(const Position& pos) {
@@ -529,8 +529,8 @@ std::optional<LayerStackKeys> get_layer_stack_keys(std::string_view names) {
         auto pos  = names.find(':', start);
         auto name = names.substr(start, pos == std::string_view::npos ? pos : pos - start);
 
-        if (name == "band")
-            result.keys.push_back({8, piece_band});
+        if (name == "piececount")
+            result.keys.push_back({8, piece_count});
         else if (name == "queen")
             result.keys.push_back({4, queens});
         else if (name == "half")

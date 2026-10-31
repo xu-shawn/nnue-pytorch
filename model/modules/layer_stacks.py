@@ -9,7 +9,7 @@ from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
 # Number of states of each layer-stack key (see LayerStacksConfig.ls_keys)
-STACK_KEY_STATES = {"band": 8, "queen": 4, "half": 3, "offi": 2}
+STACK_KEY_STATES = {"piececount": 8, "queen": 4, "half": 3, "offi": 2}
 
 
 def stack_keys(ls_keys: str) -> list[str]:
@@ -124,8 +124,8 @@ class LayerStacks(nn.Module):
     def factor_maps(
         count: int, names: list[str], keys: list[str]
     ) -> list[torch.Tensor]:
-        """Group id of every stack under each named factor: a key, or keys joined by '+' (e.g. "band+queen"). The
-        stack index is the mixed-radix index of the keys, the last varying fastest."""
+        """Group id of every stack under each named factor: a key, or keys joined by '+' (e.g.
+        "piececount+queen"). The stack index is the mixed-radix index of the keys, the last varying fastest."""
         assert count == stack_count(keys), (count, keys)
         rest = torch.arange(count)
         values = {}
