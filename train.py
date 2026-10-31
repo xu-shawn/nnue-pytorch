@@ -238,6 +238,8 @@ def main():
 
     max_epoch = args.max_epochs or 800
     if args.resume_from_model is None:
+        if args.nnue_config.init_seed >= 0:
+            torch.manual_seed(args.nnue_config.init_seed)
         nnue = M.NNUE(
             config=args.nnue_config,
             max_epoch=max_epoch,

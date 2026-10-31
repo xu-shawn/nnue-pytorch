@@ -359,6 +359,7 @@ class NNUE(nn.Module):
         return {"test_loss": loss}
 
     def compute_loss(self, batch: tuple[Tensor, ...], current_step: int):
+        quantize = current_step >= self.config.fake_quant_warmup_steps
         (
             us,
             them,
@@ -374,8 +375,8 @@ class NNUE(nn.Module):
             white_indices,
             black_indices,
             layer_stack_indices,
-            self.config.use_fake_act_quantization,
-            self.config.use_fake_weight_quantization,
+            self.config.use_fake_act_quantization and quantize,
+            self.config.use_fake_weight_quantization and quantize,
         )
         return self.compute_loss_with_scorenet(scorenet, batch, current_step)
 
