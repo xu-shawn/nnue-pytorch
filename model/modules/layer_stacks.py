@@ -8,12 +8,12 @@ from .config import LayerStacksConfig
 from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
-# Sizes of the extra layer-stack keys (see LayerStacksConfig.ls_keys)
-STACK_KEY_STATES = {"half": 3, "offi": 2}
+# Number of states of each layer-stack key (see LayerStacksConfig.ls_keys)
+STACK_KEY_STATES = {"band": 8, "queen": 4, "half": 3, "offi": 2}
 
 
 def stack_keys(ls_keys: str) -> list[str]:
-    """The extra layer-stack keys (--ls-keys) in index order."""
+    """The layer-stack keys (--ls-keys) in index order."""
     keys = [k for k in ls_keys.split(":") if k]
     for k in keys:
         assert k in STACK_KEY_STATES, (
@@ -23,11 +23,11 @@ def stack_keys(ls_keys: str) -> list[str]:
     return keys
 
 
-def stack_key_radix(keys: list[str]) -> int:
-    radix = 1
+def stack_count(keys: list[str]) -> int:
+    count = 1
     for k in keys:
-        radix *= STACK_KEY_STATES[k]
-    return radix
+        count *= STACK_KEY_STATES[k]
+    return count
 
 
 class LayerStacks(nn.Module):
@@ -122,26 +122,26 @@ class LayerStacks(nn.Module):
 
     @staticmethod
     def factor_maps(
-        count: int, names: list[str], keys: list[str] | None = None
+        count: int, names: list[str], keys: list[str]
     ) -> list[torch.Tensor]:
-        """Group id of every stack under each named factor: "band", "queen", "base" (the 32-stack bucket) and each
-        extra key by name. bucket = (piece-count band * 4 + queen bucket) * radix +
-        the mixed-radix index of the extra keys, the last varying fastest."""
-        keys = keys or []
-        per = stack_key_radix(keys)
-        assert count == 32 * per, (count, keys)
-        s = torch.arange(count)
-        base = s // per
-        table = {"band": base // 4, "queen": base % 4, "base": base}
-        rest = s % per
+        """Group id of every stack under each named factor: a key, or keys joined by '+' (e.g. "band+queen"). The
+        stack index is the mixed-radix index of the keys, the last varying fastest."""
+        assert count == stack_count(keys), (count, keys)
+        rest = torch.arange(count)
+        values = {}
         for k in reversed(keys):
-            table[k] = rest % STACK_KEY_STATES[k]
+            values[k] = rest % STACK_KEY_STATES[k]
             rest = rest // STACK_KEY_STATES[k]
-        for n in names:
-            assert n in table, (
-                f"unknown layer-stack factor {n!r} (known: {sorted(table)})"
-            )
-        return [table[n] for n in names]
+        maps = []
+        for name in names:
+            group = torch.zeros(count, dtype=torch.long)
+            for k in name.split("+"):
+                assert k in values, (
+                    f"layer-stack factor {name!r} uses {k!r}, not in --ls-keys {keys}"
+                )
+                group = group * STACK_KEY_STATES[k] + values[k]
+            maps.append(group)
+        return maps
 
     def set_group_factors(self, maps: list[torch.Tensor]) -> None:
         for layer in (self.l1, self.l2, self.output):

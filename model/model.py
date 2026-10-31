@@ -3,7 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import ComposedFeatureTransformer, LayerStacks, get_feature_cls
-from .modules.layer_stacks import stack_key_radix, stack_keys
+from .modules.layer_stacks import stack_count, stack_keys
 from .quantize import QuantizationManager
 
 
@@ -25,7 +25,7 @@ class NNUEModel(nn.Module):
 
         # The data loader computes the layer-stack index from these keys
         self.ls_keys = config.ls_keys
-        self.num_ls_buckets = 32 * stack_key_radix(stack_keys(config.ls_keys))
+        self.num_ls_buckets = stack_count(stack_keys(config.ls_keys))
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME

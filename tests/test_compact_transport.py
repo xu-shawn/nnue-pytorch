@@ -25,6 +25,7 @@ def test_native_packing(batch_size: int) -> None:
         list(range(batch_size)),
         [1] * batch_size,
         [0] * batch_size,
+        ls_keys="band:queen",
     )
     try:
         native = batch.contents

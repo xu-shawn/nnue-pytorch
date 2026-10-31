@@ -30,8 +30,8 @@ struct IFeatureExtractor {
 
 std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name);
 
-// Layer-stack index of a position: piece-count band * 4 + queen bucket, followed by the keys
-// named in --ls-keys (mixed radix, the last key varying fastest), as in Network::layer_stack().
+// Layer-stack index of a position from the keys named in --ls-keys (mixed radix, the last key
+// varying fastest), as in Network::layer_stack().
 struct LayerStackKeys {
     struct Key {
         int states;

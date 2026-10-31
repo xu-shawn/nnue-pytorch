@@ -488,6 +488,16 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
     return std::make_shared<ComposedFeatureExtractor>(std::move(components));
 }
 
+// Piece-count band: (pieces - 1) / 4
+static int piece_band(const Position& pos) { return (pos.piecesBB().count() - 1) / 4; }
+
+// 2 if the side to move has a queen, plus 1 if the opponent has one
+static int queens(const Position& pos) {
+    const Color stm = pos.sideToMove();
+    return 2 * pos.piecesBB(Piece(PieceType::Queen, stm)).any()
+         + pos.piecesBB(Piece(PieceType::Queen, !stm)).any();
+}
+
 // 0 if pawns stand on both board halves (files a-d and e-h), 1 if on one half only, 2 if none
 static int pawn_halves(const Position& pos) {
     const Bitboard pawns     = pos.piecesBB(whitePawn) | pos.piecesBB(blackPawn);
@@ -504,12 +514,7 @@ static int many_officers(const Position& pos) {
 }
 
 int LayerStackKeys::index(const Position& pos) const {
-    const Color stm    = pos.sideToMove();
-    const int   band   = (pos.piecesBB().count() - 1) / 4;
-    const int   queens = 2 * pos.piecesBB(Piece(PieceType::Queen, stm)).any()
-                     + pos.piecesBB(Piece(PieceType::Queen, !stm)).any();
-
-    int index = band * 4 + queens;
+    int index = 0;
     for (const auto& key : keys)
         index = index * key.states + key.value(pos);
     return index;
@@ -524,7 +529,11 @@ std::optional<LayerStackKeys> get_layer_stack_keys(std::string_view names) {
         auto pos  = names.find(':', start);
         auto name = names.substr(start, pos == std::string_view::npos ? pos : pos - start);
 
-        if (name == "half")
+        if (name == "band")
+            result.keys.push_back({8, piece_band});
+        else if (name == "queen")
+            result.keys.push_back({4, queens});
+        else if (name == "half")
             result.keys.push_back({3, pawn_halves});
         else if (name == "offi")
             result.keys.push_back({2, many_officers});
