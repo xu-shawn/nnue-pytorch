@@ -3,6 +3,7 @@ from torch import nn
 
 from .config import ModelConfig
 from .modules import ComposedFeatureTransformer, LayerStacks, get_feature_cls
+from .modules.layer_stacks import STACK_KEY_STATES, stack_key_radix, stack_keys
 from .quantize import QuantizationManager
 
 
@@ -22,12 +23,22 @@ class NNUEModel(nn.Module):
         self.quantize_config = config.quantize_config
         self.quantization = QuantizationManager(config.quantize_config)
 
-        self.num_ls_buckets = 32
+        self.ls_keys = stack_keys(config)
+        self.ls_key_radix = stack_key_radix(self.ls_keys)
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
+        # Index range of the K32 piece-square component, whose planes give the --ls-keys classes
+        self.k32_range = None
+        lo = 0
+        for f in self.input.features:
+            if type(f).__name__.startswith("K32"):
+                self.k32_range = (lo, lo + f.NUM_INPUTS)
+            lo += f.NUM_INPUTS
+        assert not self.ls_keys or self.k32_range is not None, "--ls-keys needs a K32 piece-square component"
+        self.num_ls_buckets = 32 * self.ls_key_radix
         self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
@@ -64,6 +75,16 @@ class NNUEModel(nn.Module):
                                 p_data_fp32.new_full(p_data_fp32.shape, max_weight)
                                 - expanded_virtual_layer
                             )
+                    if "stacked_layer" in group:
+                        ge = group["stacked_layer"].group_expansion()
+                        if ge is not None:
+                            gw = ge[0].detach()
+                            if not torch.is_tensor(min_weight):
+                                min_weight = p_data_fp32.new_full(p_data_fp32.shape, min_weight)
+                            if not torch.is_tensor(max_weight):
+                                max_weight = p_data_fp32.new_full(p_data_fp32.shape, max_weight)
+                            min_weight = min_weight - gw
+                            max_weight = max_weight - gw
                     p_data_fp32.clamp_(min_weight, max_weight)
 
     @torch.no_grad()
@@ -93,6 +114,36 @@ class NNUEModel(nn.Module):
         pc_bucket = (piece_count - 1) // 4
         return pc_bucket * 4 + queen_bucket
 
+    def _k32_planes(self, white_indices: torch.Tensor):
+        lo, hi = self.k32_range
+        inr = (white_indices >= lo) & (white_indices < hi)
+        rel = torch.remainder(white_indices - lo, 768)
+        return inr, rel // 64, rel % 64
+
+    def half_class(self, white_indices: torch.Tensor) -> torch.Tensor:
+        """0: pawns on both board halves (files a-d and e-h), 1: on one half only, 2: no pawns. The K32 horizontal
+        mirror swaps the halves, which leaves the class unchanged."""
+        inr, plane, sq = self._k32_planes(white_indices)
+        pawn = inr & (plane < 2)
+        q = (pawn & (sq % 8 <= 3)).any(dim=1)
+        k = (pawn & (sq % 8 >= 4)).any(dim=1)
+        return torch.where(q & k, 0, torch.where(q | k, 1, 2)).long()
+
+    def officers_class(self, white_indices: torch.Tensor) -> torch.Tensor:
+        """1 if some side has two or more officers (knights, bishops, rooks, queens), else 0."""
+        inr, plane, _ = self._k32_planes(white_indices)
+        officer = inr & (plane >= 2) & (plane < 10)
+        white = (officer & (plane % 2 == 0)).sum(dim=1)
+        black = (officer & (plane % 2 == 1)).sum(dim=1)
+        return (torch.maximum(white, black) >= 2).long()
+
+    def stack_key_index(self, us: torch.Tensor, white_indices: torch.Tensor) -> torch.Tensor:
+        idx = torch.zeros(white_indices.shape[0], dtype=torch.long, device=white_indices.device)
+        for k in self.ls_keys:
+            cls = {"half": lambda: self.half_class(white_indices), "offi": lambda: self.officers_class(white_indices)}[k]()
+            idx = idx * STACK_KEY_STATES[k] + cls
+        return idx
+
     def forward(
         self,
         us: torch.Tensor,
@@ -105,6 +156,10 @@ class NNUEModel(nn.Module):
         fake_quantize_weights: bool = True,
     ):
         layer_stack_indices = self.calculate_buckets(piece_count, queen_bucket)
+        if self.ls_keys:
+            layer_stack_indices = layer_stack_indices * self.ls_key_radix + self.stack_key_index(
+                us, white_indices
+            ).view_as(layer_stack_indices)
 
         l0_ = self.forward_ft(
             us,
