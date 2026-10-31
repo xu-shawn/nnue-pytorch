@@ -20,5 +20,5 @@ class LayerStacksConfig:
     ls_keys: Annotated[str, tyro.conf.arg(name="ls-keys")] = ""
     """More layer-stack keys, ':'-separated, on top of piece-count band x queen bucket (mixed radix with the last key
     varying fastest): "half" (pawns on both board halves a-d / e-h, on one half only, or none: 3), "offi" (1 if some
-    side has two or more officers N, B, R, Q: 2). Stacks = 32 x the product of the key sizes. Needs a K32
-    piece-square component."""
+    side has two or more officers N, B, R, Q: 2). Stacks = 32 x the product of the key sizes. The data loader computes
+    the stack index."""

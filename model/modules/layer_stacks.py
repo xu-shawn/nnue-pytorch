@@ -12,11 +12,13 @@ from .stacked_linear import FactorizedStackedLinear, StackedLinear
 STACK_KEY_STATES = {"half": 3, "offi": 2}
 
 
-def stack_keys(config) -> list[str]:
+def stack_keys(ls_keys: str) -> list[str]:
     """The extra layer-stack keys (--ls-keys) in index order."""
-    keys = [k for k in getattr(config, "ls_keys", "").split(":") if k]
+    keys = [k for k in ls_keys.split(":") if k]
     for k in keys:
-        assert k in STACK_KEY_STATES, f"unknown layer-stack key {k!r} (known: {sorted(STACK_KEY_STATES)})"
+        assert k in STACK_KEY_STATES, (
+            f"unknown layer-stack key {k!r} (known: {sorted(STACK_KEY_STATES)})"
+        )
     assert len(set(keys)) == len(keys), f"repeated layer-stack key in {keys}"
     return keys
 
@@ -56,9 +58,11 @@ class LayerStacks(nn.Module):
         with torch.no_grad():
             self.output.linear.bias.zero_()
 
-        factors = [f for f in getattr(config, "ls_factors", "").split(":") if f]
+        factors = [f for f in config.ls_factors.split(":") if f]
         if factors:
-            self.set_group_factors(self.factor_maps(count, factors, stack_keys(config)))
+            self.set_group_factors(
+                self.factor_maps(count, factors, stack_keys(config.ls_keys))
+            )
 
     def forward(
         self,
@@ -117,7 +121,9 @@ class LayerStacks(nn.Module):
         return l3x_
 
     @staticmethod
-    def factor_maps(count: int, names: list[str], keys: list[str] | None = None) -> list[torch.Tensor]:
+    def factor_maps(
+        count: int, names: list[str], keys: list[str] | None = None
+    ) -> list[torch.Tensor]:
         """Group id of every stack under each named factor: "band", "queen", "base" (the 32-stack bucket) and each
         extra key by name. bucket = (piece-count band * 4 + queen bucket) * radix +
         the mixed-radix index of the extra keys, the last varying fastest."""
@@ -132,7 +138,9 @@ class LayerStacks(nn.Module):
             table[k] = rest % STACK_KEY_STATES[k]
             rest = rest // STACK_KEY_STATES[k]
         for n in names:
-            assert n in table, f"unknown layer-stack factor {n!r} (known: {sorted(table)})"
+            assert n in table, (
+                f"unknown layer-stack factor {n!r} (known: {sorted(table)})"
+            )
         return [table[n] for n in names]
 
     def set_group_factors(self, maps: list[torch.Tensor]) -> None:

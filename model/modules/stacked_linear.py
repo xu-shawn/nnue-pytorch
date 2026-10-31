@@ -41,9 +41,13 @@ class StackedLinear(nn.Module):
         """maps[f][stack] = group id of the stack under factor f (zero-initialised tables)."""
         for m in maps:
             g = int(m.max()) + 1
-            self.group_factor_w.append(nn.Parameter(torch.zeros(g * self.out_features, self.in_features)))
+            self.group_factor_w.append(
+                nn.Parameter(torch.zeros(g * self.out_features, self.in_features))
+            )
             self.group_factor_b.append(nn.Parameter(torch.zeros(g * self.out_features)))
-            self.register_buffer(f"group_map_{len(self.group_maps)}", m.clone().long(), persistent=False)
+            self.register_buffer(
+                f"group_map_{len(self.group_maps)}", m.clone().long(), persistent=False
+            )
             self.group_maps.append(m.clone().long())
 
     @torch.no_grad()
@@ -65,8 +69,12 @@ class StackedLinear(nn.Module):
         b = 0
         for f, (fw, fb) in enumerate(zip(self.group_factor_w, self.group_factor_b)):
             m = getattr(self, f"group_map_{f}").to(fw.device)
-            w = w + fw.view(-1, self.out_features, self.in_features)[m].reshape(self.count * self.out_features, self.in_features)
-            b = b + fb.view(-1, self.out_features)[m].reshape(self.count * self.out_features)
+            w = w + fw.view(-1, self.out_features, self.in_features)[m].reshape(
+                self.count * self.out_features, self.in_features
+            )
+            b = b + fb.view(-1, self.out_features)[m].reshape(
+                self.count * self.out_features
+            )
         return w, b
 
     @torch.no_grad()

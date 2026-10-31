@@ -212,7 +212,9 @@ class NNUE(nn.Module):
         gfw = self.model.layer_stacks.group_factor_params(biases=False)
         gfb = self.model.layer_stacks.group_factor_params(biases=True)
         if gfw:
-            train_params.append({"params": gfw, "lr": LRs[2], "weight_decay": factorized_wd})
+            train_params.append(
+                {"params": gfw, "lr": LRs[2], "weight_decay": factorized_wd}
+            )
             train_params.append({"params": gfb, "lr": LRs[3], "weight_decay": 0.0})
 
         train_params = [group for group in train_params if len(group["params"]) > 0]
@@ -364,16 +366,14 @@ class NNUE(nn.Module):
             black_indices,
             _outcome,
             _score,
-            piece_count,
-            queen_bucket,
+            layer_stack_indices,
         ) = batch
         scorenet = self.model(
             us,
             them,
             white_indices,
             black_indices,
-            piece_count,
-            queen_bucket,
+            layer_stack_indices,
             self.config.use_fake_act_quantization,
             self.config.use_fake_weight_quantization,
         )

@@ -133,6 +133,7 @@ class TrainingDataProvider:
         io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
+        ls_keys: str = "",
     ):
         self.feature_set = feature_set.encode("utf-8")
         self.create_stream = create_stream
@@ -166,6 +167,7 @@ class TrainingDataProvider:
                 ddp_config,
                 hll_config,
                 io_config,
+                ls_keys=ls_keys,
             )
         else:
             self.stream = self.create_stream(
@@ -224,6 +226,7 @@ class SparseBatchProvider(TrainingDataProvider):
         io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
+        ls_keys: str = "",
     ):
         super().__init__(
             feature_set,
@@ -241,6 +244,7 @@ class SparseBatchProvider(TrainingDataProvider):
             io_config,
             use_pinned_memory,
             device,
+            ls_keys,
         )
 
 
@@ -257,9 +261,11 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         hll_config: DataloaderHllConfig | None = None,
         io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
+        ls_keys: str = "",
     ):
         super().__init__()
         self.feature_set = feature_set
+        self.ls_keys = ls_keys
         self.filenames = filenames
         self.batch_size = batch_size
         self.cyclic = cyclic
@@ -292,6 +298,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
             io_config=self.io_config,
             use_pinned_memory=self.use_pinned_memory,
             device=self.device,
+            ls_keys=self.ls_keys,
         )
 
     def __iter__(self):

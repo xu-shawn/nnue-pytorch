@@ -90,8 +90,7 @@ def eval_model_batch(
         black_indices,
         _outcome,
         _score,
-        piece_count,
-        queen_bucket,
+        layer_stack_indices,
     ) = batch.contents.get_tensors(device)
 
     evals = [
@@ -101,8 +100,7 @@ def eval_model_batch(
             them,
             white_indices,
             black_indices,
-            piece_count,
-            queen_bucket,
+            layer_stack_indices,
             fake_quantize_acts=fake_quantize,
             fake_quantize_weights=fake_quantize,
         )
@@ -385,7 +383,7 @@ def run_smoke_test(
     fen = chess.STARTING_FEN
     fens = [fen]
     b = data_loader.get_sparse_batch_from_fens(
-        nnue_model.input_feature_name, fens, [0], [1], [0]
+        nnue_model.input_feature_name, fens, [0], [1], [0], nnue_model.ls_keys
     )
     nnue_eval = eval_model_batch(nnue_model, b, device, False)[0]
     nnue_quant = eval_model_batch(nnue_model, b, device, True)[0]
@@ -518,6 +516,7 @@ def main():
                 [0] * len(fens),
                 [1] * len(fens),
                 [0] * len(fens),
+                nnue_model.ls_keys,
             )
             if ckpt_model:
                 ckpt_evals += eval_model_batch(
