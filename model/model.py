@@ -25,13 +25,16 @@ class NNUEModel(nn.Module):
 
         # The data loader computes the layer-stack index from these keys
         self.ls_keys = config.ls_keys
-        self.num_ls_buckets = stack_count(stack_keys(config.ls_keys))
 
         self.input = ComposedFeatureTransformer(feature_cls, self.L1, self.quantization)
         self.feature_name = self.input.FEATURE_NAME
         self.input_feature_name = self.input.INPUT_FEATURE_NAME
         self.feature_hash = self.input.HASH
-        self.layer_stacks = LayerStacks(self.num_ls_buckets, config, self.quantization)
+        self.layer_stacks = LayerStacks(
+            stack_count(stack_keys(config.ls_keys)), config, self.quantization
+        )
+        # Stacks stored in the net (fewer than the raw stacks with --ls-compact)
+        self.num_ls_buckets = self.layer_stacks.count
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
 
@@ -116,6 +119,8 @@ class NNUEModel(nn.Module):
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
     ):
+        layer_stack_indices = self.layer_stacks.stack_remap[layer_stack_indices]
+
         l0_ = self.forward_ft(
             us,
             them,
