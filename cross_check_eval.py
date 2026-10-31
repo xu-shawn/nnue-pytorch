@@ -339,6 +339,10 @@ def init_random_weights(model: M.NNUEModel) -> None:
             if "virtual_params" in group:
                 group["virtual_params"].data.uniform_(min_w * 1.2, max_w * 1.2)
                 touched.add(id(group["virtual_params"]))
+            if "stacked_layer" in group:
+                for p in group["stacked_layer"].group_factor_w:
+                    p.data.uniform_(min_w * 1.2, max_w * 1.2)
+                    touched.add(id(p))
 
         for ls in [
             model.layer_stacks.l1,
@@ -359,6 +363,9 @@ def init_random_weights(model: M.NNUEModel) -> None:
             ):
                 ls.factorized_linear.bias.data.uniform_(-0.5, 0.5)
                 touched.add(id(ls.factorized_linear.bias))
+            for b in ls.group_factor_b:
+                b.data.uniform_(-0.5, 0.5)
+                touched.add(id(b))
 
         all_param_ids = {id(p) for p in model.parameters()}
         untouched = all_param_ids - touched

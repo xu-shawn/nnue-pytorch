@@ -536,9 +536,9 @@ std::optional<LayerStackKeys> get_layer_stack_keys(std::string_view names) {
             result.keys.push_back({8, piece_count});
         else if (name == "queen")
             result.keys.push_back({4, queens});
-        else if (name == "half")
+        else if (name == "pawnhalf")
             result.keys.push_back({3, pawn_halves});
-        else if (name == "offi")
+        else if (name == "manyoffi")
             result.keys.push_back({2, many_officers});
         else
         {

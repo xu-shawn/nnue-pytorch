@@ -9,7 +9,7 @@ from .stacked_linear import FactorizedStackedLinear, StackedLinear
 
 
 # Number of states of each layer-stack key (see LayerStacksConfig.ls_keys)
-STACK_KEY_STATES = {"piececount": 8, "queen": 4, "half": 3, "offi": 2}
+STACK_KEY_STATES = {"piececount": 8, "queen": 4, "pawnhalf": 3, "manyoffi": 2}
 
 
 def stack_keys(ls_keys: str) -> list[str]:

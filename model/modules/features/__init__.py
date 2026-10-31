@@ -18,7 +18,7 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "Ram_Ram": RamRam,
 }
 
-DEFAULT_FEATURES = "Full_Threats+PP_3Wide+K32H3^"
+DEFAULT_FEATURES = "Full_Threats+PP_3Wide+Ram_Ram+K32H3^"
 
 
 def get_feature_cls(name: str) -> list[Callable[[int], InputFeature]]:

@@ -8,6 +8,7 @@ from .config import (
     CDataloaderHllConfig,
     CDataloaderIOConfig,
     CDataloaderSkipConfig,
+    DEFAULT_LS_KEYS,
     DataloaderDDPConfig,
     DataloaderHllConfig,
     DataloaderIOConfig,
@@ -92,7 +93,7 @@ def create_sparse_batch_stream(
     ddp_config: DataloaderDDPConfig = None,
     hll_config: DataloaderHllConfig | None = None,
     io_config: DataloaderIOConfig | None = None,
-    ls_keys: str = "",
+    ls_keys: str = DEFAULT_LS_KEYS,
 ) -> ctypes.c_void_p:
     if ddp_config is None:
         rank, world_size = _get_ddp_rank_and_world_size()
@@ -125,7 +126,7 @@ def destroy_sparse_batch_stream(stream: ctypes.c_void_p):
 
 
 def get_sparse_batch_from_fens(
-    feature_set: str, fens, scores, plies, results, ls_keys: str = ""
+    feature_set: str, fens, scores, plies, results, ls_keys: str = DEFAULT_LS_KEYS
 ) -> SparseBatchPtr:
     assert len(fens) == len(scores) == len(plies) == len(results)
 

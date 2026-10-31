@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 
 from . import stream
 from .config import (
+    DEFAULT_LS_KEYS,
     DataloaderDDPConfig,
     DataloaderHllConfig,
     DataloaderIOConfig,
@@ -133,7 +134,7 @@ class TrainingDataProvider:
         io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
-        ls_keys: str = "",
+        ls_keys: str = DEFAULT_LS_KEYS,
     ):
         self.feature_set = feature_set.encode("utf-8")
         self.create_stream = create_stream
@@ -226,7 +227,7 @@ class SparseBatchProvider(TrainingDataProvider):
         io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
         device="cpu",
-        ls_keys: str = "",
+        ls_keys: str = DEFAULT_LS_KEYS,
     ):
         super().__init__(
             feature_set,
@@ -261,7 +262,7 @@ class SparseBatchDataset(torch.utils.data.IterableDataset):
         hll_config: DataloaderHllConfig | None = None,
         io_config: DataloaderIOConfig | None = None,
         use_pinned_memory=False,
-        ls_keys: str = "",
+        ls_keys: str = DEFAULT_LS_KEYS,
     ):
         super().__init__()
         self.feature_set = feature_set
