@@ -491,7 +491,10 @@ std::shared_ptr<IFeatureExtractor> get_feature(std::string_view name) {
 // Piece-count band: (pieces - 1) / 4
 static int piece_count(const Position& pos) { return (pos.piecesBB().count() - 1) / 4; }
 
-// 2 if the side to move has a queen, plus 1 if the opponent has one
+// 0 if no queens on the board
+// 1 if only the non-side-to-move has a queen
+// 2 if only the side-to-move has a queen
+// 3 if both sides have a queen
 static int queens(const Position& pos) {
     const Color stm = pos.sideToMove();
     return 2 * pos.piecesBB(Piece(PieceType::Queen, stm)).any()
