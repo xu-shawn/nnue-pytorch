@@ -70,6 +70,15 @@ class StackedLinear(nn.Module):
         return w, b
 
     @torch.no_grad()
+    def keep_first_stacks(self, count: int) -> None:
+        """Drop all but the first `count` stacks (before any group factors are set)."""
+        rows = count * self.out_features
+        self.linear.weight = nn.Parameter(self.linear.weight[:rows].clone())
+        self.linear.bias = nn.Parameter(self.linear.bias[:rows].clone())
+        self.linear.out_features = rows
+        self.count = count
+
+    @torch.no_grad()
     def _init_uniformly(self) -> None:
         init_weight = self.linear.weight[0 : self.out_features, :]
         init_bias = self.linear.bias[0 : self.out_features]

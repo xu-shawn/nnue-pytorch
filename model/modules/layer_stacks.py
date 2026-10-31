@@ -69,14 +69,19 @@ class LayerStacks(nn.Module):
         # there's a non-linearity and factorization breaks.
         # This is by design. The weights in the further layers should be
         # able to diverge a lot.
+        # Build the layers for every raw stack, so the random draws (and hence the initial weights) are those of the
+        # non-compact model; all stacks start as copies of stack 0, so keeping the first `count` is exact.
         self.l1 = FactorizedStackedLinear(
-            2 * self.L1 // 2, self.L2, count, quantization, "ls_l1"
+            2 * self.L1 // 2, self.L2, raw_count, quantization, "ls_l1"
         )
-        self.l2 = StackedLinear(self.L2 * 2, self.L3, count, quantization, "ls_l2")
+        self.l2 = StackedLinear(self.L2 * 2, self.L3, raw_count, quantization, "ls_l2")
 
         self.output = StackedLinear(
-            self.L2 * 2 + self.L3 * 2, 1, count, quantization, "ls_output"
+            self.L2 * 2 + self.L3 * 2, 1, raw_count, quantization, "ls_output"
         )
+        if count != raw_count:
+            for layer in (self.l1, self.l2, self.output):
+                layer.keep_first_stacks(count)
 
         with torch.no_grad():
             self.output.linear.bias.zero_()
