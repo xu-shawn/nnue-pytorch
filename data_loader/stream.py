@@ -3,12 +3,12 @@ import os  # noqa: F401
 
 from ._native import FenBatchPtr, SparseBatchPtr, c_lib
 from .config import (
+    DEFAULT_LS_KEYS,
     CDataloaderDDPConfig,
     CDataloaderFileStats,
     CDataloaderHllConfig,
     CDataloaderIOConfig,
     CDataloaderSkipConfig,
-    DEFAULT_LS_KEYS,
     DataloaderDDPConfig,
     DataloaderHllConfig,
     DataloaderIOConfig,
