@@ -15,6 +15,14 @@ import data_loader
 import model as M
 from config import TrainingConfig
 from data_loader.config import DataloaderDDPConfig
+from model.modules.layer_stacks import STACK_KEY_STATES, stack_count, stack_keys
+from model.modules.stack_table import (
+    count_stacks,
+    fallback_table,
+    resolve_data_path,
+    table_from_state_dict,
+    table_to_str,
+)
 from trainer.callbacks import (
     CheckpointManager,
     ExplicitSWA,
@@ -151,6 +159,46 @@ def _normalize_optimizer_and_schedulers(optimizer_and_schedulers):
     return optimizer, normalized_schedulers
 
 
+def prepare_stack_table(args) -> None:
+    """--ls-compact: take the layer-stack table from the checkpoint being resumed, or build it from --ls-remap-data."""
+    mc = args.nnue_config.model_config
+    if not mc.ls_compact or mc.ls_remap_table:
+        return
+    if args.resume_from_checkpoint:
+        ckpt = torch.load(
+            args.resume_from_checkpoint, map_location="cpu", weights_only=False
+        )
+        table = table_from_state_dict(ckpt["state_dict"])
+        if table is not None:
+            mc.ls_remap_table = table
+            print(
+                f"Layer-stack table from {args.resume_from_checkpoint}: {table.count(':')} stacks remapped"
+            )
+            return
+    if mc.ls_remap_data:
+        path = resolve_data_path(mc.ls_remap_data, args.datasets)
+        keys = stack_keys(mc.ls_keys)
+        threads = max(args.threads, args.num_workers, 1)
+        counts = count_stacks(path, mc.ls_keys, stack_count(keys), threads)
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            device = (
+                torch.device("cuda", torch.cuda.current_device())
+                if dist.get_backend() == "nccl"
+                else "cpu"
+            )
+            total = torch.from_numpy(counts).to(device)
+            dist.all_reduce(total)
+            counts = total.cpu().numpy()
+        remap = fallback_table(counts, keys, STACK_KEY_STATES, mc.ls_remap_min)
+        mc.ls_remap_table = table_to_str(remap)
+        if not dist.is_initialized() or dist.get_rank() == 0:
+            print(
+                f"Layer-stack table from {path}: {int(counts.sum())} positions, {len(remap)} raw stacks, "
+                f"{int((counts == 0).sum())} never seen, {sum(s != f for s, f in enumerate(remap))} remapped "
+                f"(fewer than {mc.ls_remap_min}), {sum(s == f for s, f in enumerate(remap))} stored"
+            )
+
+
 def main():
     args = tyro.cli(TrainingConfig)
     actual_threads, actual_workers = args.threads, args.num_workers
@@ -237,6 +285,7 @@ def main():
     feature_name = args.nnue_config.features
 
     max_epoch = args.max_epochs or 800
+    prepare_stack_table(args)
     if args.resume_from_model is None:
         nnue = M.NNUE(
             config=args.nnue_config,

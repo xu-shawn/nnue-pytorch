@@ -49,6 +49,15 @@ class StackedLinear(nn.Module):
             self.group_maps.append(m.clone().long())
 
     @torch.no_grad()
+    def keep_first_stacks(self, count: int) -> None:
+        """Drop all but the first `count` stacks (before any group factors are set)."""
+        rows = count * self.out_features
+        self.linear.weight = nn.Parameter(self.linear.weight[:rows].clone())
+        self.linear.bias = nn.Parameter(self.linear.bias[:rows].clone())
+        self.linear.out_features = rows
+        self.count = count
+
+    @torch.no_grad()
     def coalesce_group_factors(self) -> None:
         ge = self.group_expansion()
         if ge is None:
