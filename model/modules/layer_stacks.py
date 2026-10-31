@@ -125,7 +125,7 @@ class LayerStacks(nn.Module):
         count: int, names: list[str], keys: list[str]
     ) -> list[torch.Tensor]:
         """Group id of every stack under each named factor: a key, or keys joined by '+' (e.g.
-        "piececount+queen"). The stack index is the mixed-radix index of the keys, the last varying fastest."""
+        "piececount+queen"). The stack index is the mixed-radix index of the keys."""
         assert count == stack_count(keys), (count, keys)
         rest = torch.arange(count)
         values = {}

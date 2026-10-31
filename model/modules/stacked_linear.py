@@ -29,8 +29,6 @@ class StackedLinear(nn.Module):
         self.quantization = quantization
         self.layer_key = layer_key
 
-        # Optional group factors (set_group_factors): extra tables shared by stacks with the same group id; they fold
-        # into the per-stack weights at export, so the exported net is an ordinary set of stacks.
         self.group_factor_w = nn.ParameterList()
         self.group_factor_b = nn.ParameterList()
         self.group_maps: list[torch.Tensor] = []
