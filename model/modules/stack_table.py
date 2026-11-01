@@ -10,8 +10,10 @@ from pathlib import Path
 
 import numpy as np
 
-# Distance between key values when choosing a fallback (pawnhalf: no pawns -> one half -> both halves)
+# Distance between key values when choosing a fallback (imb3: behind <-> level <-> ahead; pawnhalf: no pawns ->
+# one half -> both halves)
 KEY_DISTANCE = {
+    "imb3": [[0, 1, 1], [1, 0, 2], [1, 2, 0]],
     "pawnhalf": [[0, 1, 2], [1, 0, 1], [2, 1, 0]],
     "manyoffi": [[0, 1], [1, 0]],
 }

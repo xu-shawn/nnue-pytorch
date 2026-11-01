@@ -24,6 +24,7 @@ class LayerStacksConfig:
     )
     """Layer-stack keys, ':'-separated, in mixed radix with the last key varying fastest: "piececount" (piece-count
     band, (pieces - 1) / 4: 8), "queen" (2 if the side to move has a queen, plus 1 if the opponent has one: 4),
+    "imb3" (side-to-move material balance P 1, N 3, B 3, R 5, Q 9: within one pawn, ahead or behind by two or more: 3),
     "pawnhalf" (pawns on both board halves a-d / e-h, on one half only, or none: 3), "manyoffi" (1 if some side has
     two or more officers N, B, R, Q: 2). Stacks = the product of the key sizes. The data loader computes the stack
     index."""

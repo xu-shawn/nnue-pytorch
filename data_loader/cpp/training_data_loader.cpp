@@ -516,6 +516,20 @@ static int many_officers(const Position& pos) {
     return std::max(officers(Color::White), officers(Color::Black)) >= 2;
 }
 
+// Material balance of the side to move (P 1, N 3, B 3, R 5, Q 9): 0 if within one pawn, 1 if ahead by two or
+// more, 2 if behind by two or more
+static int imbalance(const Position& pos) {
+    const Color stm  = pos.sideToMove();
+    const auto  diff = [&](PieceType pt) {
+        return int(pos.piecesBB(Piece(pt, stm)).count())
+             - int(pos.piecesBB(Piece(pt, !stm)).count());
+    };
+    const int balance = diff(PieceType::Pawn)
+                      + 3 * (diff(PieceType::Knight) + diff(PieceType::Bishop))
+                      + 5 * diff(PieceType::Rook) + 9 * diff(PieceType::Queen);
+    return balance >= -1 && balance <= 1 ? 0 : balance > 0 ? 1 : 2;
+}
+
 int LayerStackKeys::index(const Position& pos) const {
     int index = 0;
     for (const auto& key : keys)
@@ -536,6 +550,8 @@ std::optional<LayerStackKeys> get_layer_stack_keys(std::string_view names) {
             result.keys.push_back({8, piece_count});
         else if (name == "queen")
             result.keys.push_back({4, queens});
+        else if (name == "imb3")
+            result.keys.push_back({3, imbalance});
         else if (name == "pawnhalf")
             result.keys.push_back({3, pawn_halves});
         else if (name == "manyoffi")
