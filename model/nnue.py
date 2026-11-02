@@ -217,6 +217,37 @@ class NNUE(nn.Module):
             )
             train_params.append({"params": gfb, "lr": LRs[3], "weight_decay": 0.0})
 
+        # Per-component feature transformer learning rates: split the FT weight groups.
+        ft_mult = optimizer_config.ft_lr_mult
+        bucket_mult = optimizer_config.ft_bucket_lr_mult
+        threat_mult = optimizer_config.threat_lr_mult
+        if (ft_mult, bucket_mult, threat_mult) != (1.0, 1.0, 1.0):
+            features = self.model.input.features
+            bucketed = {id(f.weight) for f in features if hasattr(f, "virtual_weight")}
+            threats = {
+                id(f.weight) for f in features if type(f).__name__ == "FullThreats"
+            }
+            rows = train_params[0]["params"]
+            train_params[0]["params"] = [
+                p for p in rows if id(p) not in bucketed | threats
+            ]
+            train_params[0]["lr"] = LRs[0] * ft_mult
+            train_params[1]["lr"] = LRs[0] * ft_mult
+            train_params.append(
+                {
+                    "params": [p for p in rows if id(p) in bucketed],
+                    "lr": LRs[0] * ft_mult * bucket_mult,
+                    "weight_decay": ft_wd,
+                }
+            )
+            train_params.append(
+                {
+                    "params": [p for p in rows if id(p) in threats],
+                    "lr": LRs[0] * ft_mult * threat_mult,
+                    "weight_decay": ft_wd,
+                }
+            )
+
         train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)
