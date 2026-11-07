@@ -46,6 +46,19 @@ class TrainingConfig:
     swa_start_epoch: int = -1
     """Start epoch for swa. Negative number to disable."""
 
+    swa_carry: bool = False
+    """Keep the SWA average and the optimizer state in checkpoints, so training can resume after SWA has started
+    (job restarts, later training stages)."""
+
+    swa_finalize: bool = True
+    """At the end of training, write the SWA weights as last.ckpt. Turn off to continue the average in a later stage."""
+
+    lr_floor: float = 0.0
+    """From step lr_floor_start on, keep each parameter group's learning rate at least this fraction of its max_lr."""
+
+    lr_floor_start: int = 0
+    """Optimizer step from which lr_floor applies."""
+
     max_time: str = "30:00:00:00"
     """The maximum time to train for. A string in the format DD:HH:MM:SS (Default 30:00:00:00)."""
 

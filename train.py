@@ -26,6 +26,7 @@ from model.modules.stack_table import (
 from trainer.callbacks import (
     CheckpointManager,
     ExplicitSWA,
+    LRFloor,
     SimpleLineLogger,
     TerminateOnNaN,
     TimeLimit,
@@ -430,8 +431,13 @@ def main():
         TimeLimit(args.max_time),
         nan_callback,
     ]
+    if args.lr_floor > 0:
+        trainer_callbacks.append(LRFloor(args.lr_floor, args.lr_floor_start))
+
     if 0 <= args.swa_start_epoch < args.max_epochs:
-        swa_callback = ExplicitSWA(args.swa_start_epoch, tb_logger.log_dir)
+        swa_callback = ExplicitSWA(
+            args.swa_start_epoch, tb_logger.log_dir, args.swa_carry, args.swa_finalize
+        )
         trainer_callbacks.append(swa_callback)
 
     if rank == 0 and args.async_checkpoint_save:
@@ -481,7 +487,11 @@ def main():
 
     aborted_due_to_nan = nan_callback.nan_detected
 
-    if 0 <= args.swa_start_epoch < args.max_epochs and not aborted_due_to_nan:
+    if (
+        0 <= args.swa_start_epoch < args.max_epochs
+        and args.swa_finalize
+        and not aborted_due_to_nan
+    ):
         nnue.eval()
         swa_callback.swap_weights(nnue, to_eval=True)
         if val is not None:

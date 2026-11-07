@@ -102,14 +102,41 @@ class WeightClipper(Callback):
             trainer.model.model.clip_weights(include_input=True)
 
 
+class LRFloor(Callback):
+    """From optimizer step `start` on, keep each param group's lr at least `frac` * its max_lr."""
+
+    def __init__(self, frac: float, start: int):
+        super().__init__()
+        self.frac = frac
+        self.start = start
+
+    @torch.no_grad()
+    @torch.compiler.disable
+    def on_train_batch_end(self, trainer, batch=None, batch_idx=None, outputs=None):
+        _, _, _ = batch, batch_idx, outputs  # Unused
+        if trainer.global_step < self.start:
+            return
+        for group in trainer.optimizer.param_groups:
+            group["lr"] = max(group["lr"], self.frac * group.get("max_lr", group["lr"]))
+
+
 class ExplicitSWA(Callback):
-    def __init__(self, swa_start_epoch: int, save_dir: str):
+    def __init__(
+        self,
+        swa_start_epoch: int,
+        save_dir: str,
+        carry: bool = False,
+        finalize: bool = True,
+    ):
         super().__init__()
         self.swa_start_epoch = swa_start_epoch
         self.save_dir = save_dir
+        self.carry = carry
+        self.finalize = finalize
 
         self.swa_model = None
         self.to_eval = False
+        self.loaded_state = None
 
     def swap_weights(self, model, to_eval):
         if self.swa_model is not None and self.to_eval != bool(to_eval):
@@ -125,6 +152,9 @@ class ExplicitSWA(Callback):
         if trainer.rank != 0:
             return
         self.swa_model = AveragedModel(trainer.model.model)
+        if self.loaded_state is not None:
+            self.swa_model.load_state_dict(self.loaded_state)
+            self.loaded_state = None
 
     @torch.no_grad()
     @torch.compiler.disable
@@ -152,6 +182,13 @@ class ExplicitSWA(Callback):
     @torch.no_grad()
     @torch.compiler.disable
     def on_save_checkpoint(self, trainer, checkpoint=None):
+        if self.carry:
+            if self.swa_model is not None and int(self.swa_model.n_averaged) > 0:
+                checkpoint["swa_state"] = {
+                    k: v.detach().cpu().clone()
+                    for k, v in self.swa_model.state_dict().items()
+                }
+            return
         if trainer.current_epoch >= self.swa_start_epoch:
             # Strip optimizer and lr_scheduler states from the checkpoint to
             # prevent excessive memory usage, since they are not needed for SWA
@@ -173,6 +210,9 @@ class ExplicitSWA(Callback):
     @torch.compiler.disable
     def on_load_checkpoint(self, trainer, checkpoint=None):
         _ = trainer  # Unused
+        if self.carry:
+            self.loaded_state = checkpoint.get("swa_state")
+            return
         checkpoint_epoch = checkpoint.get("epoch")
         if checkpoint_epoch is None:
             return
@@ -186,7 +226,7 @@ class ExplicitSWA(Callback):
     @torch.no_grad()
     @torch.compiler.disable
     def on_train_end(self, trainer):
-        if trainer.current_epoch < self.swa_start_epoch:
+        if not self.finalize or trainer.current_epoch < self.swa_start_epoch:
             return
 
         # Optimizer is assumed to perform pointer swaps on train() and eval(),
