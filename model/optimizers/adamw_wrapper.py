@@ -21,6 +21,25 @@ class AdamWConfig(LRSchedulerConfig):
     """Whether to use fused kernel for AdamW if supported by PyTorch and device."""
 
 
+class LazyDecayAdamW(torch.optim.AdamW):
+    """AdamW whose param groups may carry `lazy_weight_decay`: decoupled weight decay
+    applied only to the rows (dim 0) that received a gradient in this step."""
+
+    @torch.no_grad()
+    def step(self, closure=None):
+        for group in self.param_groups:
+            wd = group.get("lazy_weight_decay", 0.0)
+            if wd == 0.0:
+                continue
+            factor = 1.0 - float(group["lr"]) * wd
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                active = torch.count_nonzero(p.grad, dim=1) > 0
+                p.mul_(torch.where(active, factor, 1.0).unsqueeze(1))
+        return super().step(closure)
+
+
 class AdamWWrapper:
     def __init__(self, config):
         self.config = config
@@ -29,7 +48,7 @@ class AdamWWrapper:
 
     def configure_optimizers(self, train_params):
         betas = (self.config.adamw_beta1, self.config.adamw_beta2)
-        self.optimizer = torch.optim.AdamW(
+        self.optimizer = LazyDecayAdamW(
             train_params,
             lr=self.config.lr,
             betas=betas,

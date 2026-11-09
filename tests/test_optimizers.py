@@ -305,6 +305,70 @@ def test_virtual_ft_weight_decay_and_pruning():
         assert group["weight_decay"] != 0.05  # No virtual group since it had no params
 
 
+def test_ft_lazy_weight_decay():
+    from model.optimizers.adamw_wrapper import LazyDecayAdamW
+
+    torch.manual_seed(0)
+    w0 = torch.randn(6, 4)
+    grad = torch.randn(6, 4)
+    grad[[1, 4]] = 0.0  # rows 1 and 4 are inactive
+    grad[2, :3] = 0.0  # a row with one nonzero entry is active
+
+    def run(lazy, g):
+        p = torch.nn.Parameter(w0.clone())
+        key = "lazy_weight_decay" if lazy else "weight_decay"
+        opt = LazyDecayAdamW(
+            [{"params": [p], "lr": 0.1, key: 0.5}], weight_decay=0.0, fused=False
+        )
+        p.grad = g.clone()
+        opt.step()
+        return p.detach()
+
+    # Every row active: identical to AdamW's own decoupled decay.
+    dense_grad = torch.randn(6, 4)
+    assert torch.equal(run(True, dense_grad), run(False, dense_grad))
+
+    lazy, dense = run(True, grad), run(False, grad)
+    active = [0, 2, 3, 5]
+    assert torch.equal(lazy[active], dense[active])
+    assert torch.equal(lazy[[1, 4]], w0[[1, 4]])
+    assert not torch.equal(dense[[1, 4]], w0[[1, 4]])
+
+    # The model moves the decay of the real FT rows (all learning-rate groups) to the lazy key.
+    config = NNUEConfig(
+        features="Full_Threats+K32H3^",
+        optimizer_config=OptimizerConfig(
+            optimizer_name="adamw",
+            ft_weight_decay=0.02,
+            virtual_ft_weight_decay=0.03,
+            ft_lazy_weight_decay=True,
+            ft_bucket_lr_mult=0.25,
+            threat_lr_mult=0.5,
+        ),
+    )
+    model = NNUE(config=config)
+    opt = model.configure_optimizers()[0][0]
+    assert isinstance(opt, LazyDecayAdamW)
+    features = model.model.input.features
+    real = {id(f.weight) for f in features}
+    lazy_groups = [g for g in opt.param_groups if g.get("lazy_weight_decay", 0.0) > 0]
+    assert {id(p) for g in lazy_groups for p in g["params"]} == real
+    assert all(g["weight_decay"] == 0.0 for g in lazy_groups)
+    assert all(g["lazy_weight_decay"] == 0.02 for g in lazy_groups)
+    virtual = [g for g in opt.param_groups if g["weight_decay"] == 0.03]
+    assert len(virtual) == 1 and "lazy_weight_decay" not in virtual[0]
+
+    with pytest.raises(ValueError):
+        NNUE(
+            config=NNUEConfig(
+                features="K32H3^",
+                optimizer_config=OptimizerConfig(
+                    optimizer_name="rangerlite", ft_lazy_weight_decay=True
+                ),
+            )
+        ).configure_optimizers()
+
+
 def test_weight_clipper_and_swa_export():
     from trainer.callbacks import ExplicitSWA, WeightClipper
 

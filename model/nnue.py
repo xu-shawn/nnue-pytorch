@@ -248,6 +248,20 @@ class NNUE(nn.Module):
                 }
             )
 
+        if optimizer_config.ft_lazy_weight_decay:
+            if optimizer_config.optimizer_name.lower().strip() != "adamw":
+                raise ValueError("ft_lazy_weight_decay requires the adamw optimizer.")
+            ft_rows = {
+                id(p)
+                for p in _get_parameters(
+                    [self.model.input], get_biases=False, get_virtual=False
+                )
+            }
+            for group in train_params:
+                if group["params"] and all(id(p) in ft_rows for p in group["params"]):
+                    group["lazy_weight_decay"] = group["weight_decay"]
+                    group["weight_decay"] = 0.0
+
         train_params = [group for group in train_params if len(group["params"]) > 0]
 
         return self.optimizer_wrapper.configure_optimizers(train_params)

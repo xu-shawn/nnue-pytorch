@@ -27,6 +27,9 @@ class OptimizerConfig(RangerLiteConfig, ScheduleFreeConfig, AdamWConfig):
     virtual_ft_weight_decay: float = 0.0
     """Weight decay to apply to the virtual feature transformer parameters."""
 
+    ft_lazy_weight_decay: bool = False
+    """Apply ft_weight_decay only to the feature transformer rows active in the batch (adamw only)."""
+
     dense_weight_decay: float = 0.0
     """Weight decay to apply to the dense layer parameters."""
 
