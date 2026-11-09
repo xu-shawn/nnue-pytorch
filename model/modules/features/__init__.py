@@ -5,15 +5,21 @@ from typing import Annotated
 
 import tyro
 
+from .bishop_triangle import BishopTriangle
 from .full_threats import FullThreats
 from .input_feature import InputFeature
 from .k32h3 import K32H3
+from .knight_blockade import KnightBlockade
+from .knight_mob_cover import KnightMobCover
 from .pp_3wide import PP3Wide
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "K32H3^": K32H3,
     "Full_Threats": FullThreats,
     "PP_3Wide": PP3Wide,
+    "Knight_MobCover": KnightMobCover,
+    "Knight_Blockade": KnightBlockade,
+    "Bishop_Triangle": BishopTriangle,
 }
 
 DEFAULT_FEATURES = "Full_Threats+PP_3Wide+K32H3^"

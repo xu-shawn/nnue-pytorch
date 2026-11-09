@@ -153,7 +153,7 @@ struct FullThreats {
     static constexpr int PIECE_NB            = 12;
     static constexpr int COLOR_NB            = 2;
     static constexpr int PIECE_TYPE_NB       = 6;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int MAX_ACTIVE_FEATURES = 96;
 
     static constexpr int INPUTS = threatfeatures;
 
@@ -297,7 +297,7 @@ struct PP_3Wide {
 
     static constexpr int PAWN_IDS            = 2 * 48;
     static constexpr int INPUTS              = PAWN_IDS * (PAWN_IDS - 1) / 2;
-    static constexpr int MAX_ACTIVE_FEATURES = 128;
+    static constexpr int MAX_ACTIVE_FEATURES = 78;
 
     static int make_pawn_id(Color color, Square square) {
         return 48 * static_cast<int>(color) + static_cast<int>(square) - static_cast<int>(a2);
@@ -364,6 +364,118 @@ struct PP_3Wide {
     }
 };
 
+// Opponent pawns attacking one of a knight's attack squares, except pawns attacking the knight and pawns it attacks.
+// Index: (knight colour rel. the perspective * 64 + oriented knight square) * 48 + oriented pawn square - 8.
+struct KnightMobCover {
+    static constexpr std::string_view NAME                = "Knight_MobCover";
+    static constexpr int              INPUTS              = 2 * 64 * 48;
+    static constexpr int              MAX_ACTIVE_FEATURES = 64;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&     pos    = e.pos;
+        const int orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+        int k = 0;
+        for (Color c : {Color::White, Color::Black})
+        {
+            const Color    enemy = !c;
+            const Bitboard pawns = pos.piecesBB(Piece(PieceType::Pawn, enemy));
+            const int      crel  = static_cast<int>(c) ^ static_cast<int>(color);
+            for (Square s : pos.piecesBB(Piece(PieceType::Knight, c)))
+            {
+                const Bitboard att = bb::pseudoAttacks<PieceType::Knight>(s);
+                const int      row = (crel * 64 + (static_cast<int>(s) ^ orient)) * 48;
+                for (Square q : pawns)
+                {
+                    const Bitboard pa = bb::pawnAttacks(Bitboard::square(q), enemy);
+                    if ((pa & Bitboard::square(s)).bits() || (att & Bitboard::square(q)).bits()
+                        || !(pa & att).bits() || k == MAX_ACTIVE_FEATURES)
+                        continue;
+                    features[k++] = row + (static_cast<int>(q) ^ orient) - 8;
+                }
+            }
+        }
+        return {k, INPUTS};
+    }
+};
+
+// Pawns whose stop square holds an enemy knight. Index: pawn colour rel. the perspective * 48 + oriented pawn square
+// - 8.
+struct KnightBlockade {
+    static constexpr std::string_view NAME                = "Knight_Blockade";
+    static constexpr int              INPUTS              = 96;
+    static constexpr int              MAX_ACTIVE_FEATURES = 8;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&     pos    = e.pos;
+        const int orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+        int k = 0;
+        for (Color c : {Color::White, Color::Black})
+            for (Square p : pos.piecesBB(Piece(PieceType::Pawn, c)))
+            {
+                const int stop = static_cast<int>(p) + (c == Color::White ? 8 : -8);
+                if (stop < 0 || stop > 63)
+                    continue;
+                const Piece q = pos.pieceAt(Square(stop));
+                if (q == Piece::none() || q.type() != PieceType::Knight || q.color() == c
+                    || k == MAX_ACTIVE_FEATURES)
+                    continue;
+                features[k++] = (static_cast<int>(c) ^ static_cast<int>(color)) * 48
+                              + (static_cast<int>(p) ^ orient) - 8;
+            }
+        return {k, INPUTS};
+    }
+};
+
+// Per bishop, which of the four squares ahead of it (in its side's forward direction) hold enemy pawns: bit 1 one
+// ahead, 2 two ahead, 4 / 8 two ahead on the lower / higher oriented file. Pattern 0 emits nothing. Index: (bishop
+// colour rel. the perspective * 64 + oriented bishop square) * 16 + pattern.
+struct BishopTriangle {
+    static constexpr std::string_view NAME                = "Bishop_Triangle";
+    static constexpr int              INPUTS              = 2 * 64 * 16;
+    static constexpr int              MAX_ACTIVE_FEATURES = 10;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&     pos    = e.pos;
+        const int orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+        int k = 0;
+        for (Color c : {Color::White, Color::Black})
+        {
+            const Bitboard pawns = pos.piecesBB(Piece(PieceType::Pawn, !c));
+            const int      dr    = c == Color::White ? 1 : -1;
+            for (Square s : pos.piecesBB(Piece(PieceType::Bishop, c)))
+            {
+                const int si = static_cast<int>(s), f = si & 7, r = si >> 3, os = si ^ orient;
+                auto      pawn_at = [&](int ff, int rr) {
+                    return ff >= 0 && ff < 8 && rr >= 0 && rr < 8
+                        && (pawns & Bitboard::square(Square(rr * 8 + ff))).bits();
+                };
+                int pat = 0;
+                if (pawn_at(f, r + dr))
+                    pat |= 1;
+                if (pawn_at(f, r + 2 * dr))
+                    pat |= 2;
+                for (int df : {-1, 1})
+                    if (pawn_at(f + df, r + 2 * dr))
+                    {
+                        const int t = (r + 2 * dr) * 8 + f + df;
+                        pat |= ((t ^ orient) % 8 > os % 8) ? 8 : 4;
+                    }
+                if (pat == 0 || k == MAX_ACTIVE_FEATURES)
+                    continue;
+                features[k++] =
+                  ((static_cast<int>(c) ^ static_cast<int>(color)) * 64 + os) * 16 + pat;
+            }
+        }
+        return {k, INPUTS};
+    }
+};
+
 struct ComposedFeatureExtractor: IFeatureExtractor {
     std::vector<std::unique_ptr<IFeatureExtractor>> extractors;
     int                                             m_inputs;
@@ -420,6 +532,12 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<SimpleExtractor<FullThreats>>();
     if (name == "PP_3Wide")
         return std::make_unique<SimpleExtractor<PP_3Wide>>();
+    if (name == "Knight_MobCover")
+        return std::make_unique<SimpleExtractor<KnightMobCover>>();
+    if (name == "Knight_Blockade")
+        return std::make_unique<SimpleExtractor<KnightBlockade>>();
+    if (name == "Bishop_Triangle")
+        return std::make_unique<SimpleExtractor<BishopTriangle>>();
     if (name == "K32H3")
         return std::make_unique<SimpleExtractor<K32H3>>();
     return nullptr;
