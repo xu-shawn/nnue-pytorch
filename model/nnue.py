@@ -371,9 +371,13 @@ class NNUE(nn.Module):
 
     def train_step(self, batch, current_epoch, global_step):
         _ = current_epoch
-        loss = self.compute_loss(batch, global_step)
+        if self.config.ft_act_l1 > 0.0:
+            loss, ft_out = self.compute_loss(batch, global_step, return_ft=True)
+            total = loss + self.config.ft_act_l1 * ft_out.mean()
+        else:
+            total = loss = self.compute_loss(batch, global_step)
         self.loss_metrics["train_loss_epoch"].update(loss)
-        return {"loss": loss, "train_loss": loss.detach()}
+        return {"loss": total, "train_loss": loss.detach()}
 
     @torch.no_grad()
     def val_step(self, batch, current_epoch, global_step):
@@ -389,7 +393,9 @@ class NNUE(nn.Module):
         self.loss_metrics["test_loss_epoch"].update(loss)
         return {"test_loss": loss}
 
-    def compute_loss(self, batch: tuple[Tensor, ...], current_step: int):
+    def compute_loss(
+        self, batch: tuple[Tensor, ...], current_step: int, return_ft: bool = False
+    ):
         quantize = current_step >= self.config.fake_quant_warmup_steps
         (
             us,
@@ -408,7 +414,13 @@ class NNUE(nn.Module):
             layer_stack_indices,
             self.config.use_fake_act_quantization and quantize,
             self.config.use_fake_weight_quantization and quantize,
+            return_ft,
         )
+        if return_ft:
+            scorenet, ft_out = scorenet
+            return self.compute_loss_with_scorenet(
+                scorenet, batch, current_step
+            ), ft_out
         return self.compute_loss_with_scorenet(scorenet, batch, current_step)
 
     def compute_loss_with_scorenet(

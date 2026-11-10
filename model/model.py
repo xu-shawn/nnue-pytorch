@@ -118,6 +118,7 @@ class NNUEModel(nn.Module):
         layer_stack_indices: torch.Tensor,
         fake_quantize_acts: bool = True,
         fake_quantize_weights: bool = True,
+        return_ft: bool = False,
     ):
         layer_stack_indices = self.layer_stacks.stack_remap[layer_stack_indices]
 
@@ -133,4 +134,4 @@ class NNUEModel(nn.Module):
             l0_, layer_stack_indices, fake_quantize_acts, fake_quantize_weights
         )
 
-        return x
+        return (x, l0_) if return_ft else x

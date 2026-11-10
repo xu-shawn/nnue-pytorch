@@ -130,6 +130,9 @@ class NNUEConfig(FeatureConfig):
     """Train without fake quantization (activations and weights) for the first N steps."""
     init_seed: int = -1
     """Seed torch right before the model is built, so the initialization is reproducible; -1 leaves it unseeded."""
+    ft_act_l1: float = 0.0
+    """Weight of an L1 penalty on the feature transformer outputs (their mean over the batch and the outputs),
+    added to the training loss to make the outputs sparser. The logged losses exclude it."""
 
     model_config: OmitArgPrefixes[ModelConfig] = field(default_factory=ModelConfig)
     loss_params: OmitArgPrefixes[LossParams] = field(default_factory=LossParams)
