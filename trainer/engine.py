@@ -15,6 +15,8 @@ import torch.distributed as dist
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from .grad_clip import clip_grad_norm_
+
 
 def init_distributed(
     backend: str | None = None,
@@ -341,9 +343,7 @@ class SimpleTrainer:
             loss.backward()
 
             if self.gradient_clip_val is not None and self.gradient_clip_val > 0:
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), self.gradient_clip_val
-                )
+                clip_grad_norm_(self.model.parameters(), self.gradient_clip_val)
 
             self.optimizer.step()
 
