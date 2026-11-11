@@ -50,7 +50,7 @@ def _aggregated_tile_size(l1_size, batch_size, max_active_features, capability):
     The tile must stay at or below 16 positions: rows are tracked in a 32-bit
     mask (two rows per position, one per perspective).
     """
-    if l1_size == 1024 and max_active_features == 288:
+    if l1_size == 1024 and max_active_features <= 288:
         if capability == (8, 9) and batch_size >= 32768:
             return 14
         if capability == (8, 0) and batch_size >= 8192:
