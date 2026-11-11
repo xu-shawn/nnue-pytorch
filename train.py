@@ -374,6 +374,7 @@ def main():
         # lambda scheduling and checkpointing in plain Python.
         torch._dynamo.config.cache_size_limit = 64
         nnue.model = torch.compile(nnue.model, backend=args.compile_backend)
+        nnue.model.enable_compiled_clipping(args.compile_backend)
         # The loss itself is a long eager pointwise chain outside the model;
         # compiling it fuses those kernels.
         nnue.enable_compiled_loss()

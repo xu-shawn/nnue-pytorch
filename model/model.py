@@ -7,6 +7,34 @@ from .modules.layer_stacks import stack_count, stack_keys
 from .quantize import QuantizationManager
 
 
+def _clamped_stack_weight(p, min_weight, max_weight, virtual_params, stacked_layer):
+    """A layer-stack weight clamped as NNUEModel.clip_weights does it (same operations)."""
+    min_weight = p.new_full(p.shape, min_weight)
+    max_weight = p.new_full(p.shape, max_weight)
+    if virtual_params is not None:
+        xs = p.shape[0] // virtual_params.shape[0]
+        ys = p.shape[1] // virtual_params.shape[1]
+        expanded_virtual_layer = virtual_params.repeat(xs, ys)
+        min_weight = min_weight - expanded_virtual_layer
+        max_weight = max_weight - expanded_virtual_layer
+    ge = stacked_layer.group_expansion()
+    if ge is not None:
+        min_weight = min_weight - ge[0]
+        max_weight = max_weight - ge[0]
+    return p.clamp(min_weight, max_weight)
+
+
+_compiled_clamps: dict = {}
+
+
+def _compiled_clamp(backend: str):
+    if backend not in _compiled_clamps:
+        _compiled_clamps[backend] = torch.compile(
+            _clamped_stack_weight, backend=backend
+        )
+    return _compiled_clamps[backend]
+
+
 class NNUEModel(nn.Module):
     def __init__(
         self,
@@ -36,6 +64,7 @@ class NNUEModel(nn.Module):
         self.num_ls_buckets = self.layer_stacks.count
 
         self.weight_clipping = self.quantization.generate_weight_clipping_config(self)
+        self._clip_backend: str | None = None
 
         self.input.init_weights()
 
@@ -47,6 +76,21 @@ class NNUEModel(nn.Module):
         """
         if include_input:
             self.input.clip_weights(self.quantization)
+
+        if self._clip_backend is not None:
+            clamp = _compiled_clamp(self._clip_backend)
+            for group in self.weight_clipping:
+                p = group["params"][0]
+                p.data.copy_(
+                    clamp(
+                        p,
+                        group["min_weight"],
+                        group["max_weight"],
+                        group.get("virtual_params"),
+                        group["stacked_layer"],
+                    )
+                )
+            return
 
         for group in self.weight_clipping:
             for p in group["params"]:
@@ -84,6 +128,11 @@ class NNUEModel(nn.Module):
                             min_weight = min_weight - gw
                             max_weight = max_weight - gw
                     p_data_fp32.clamp_(min_weight, max_weight)
+
+    def enable_compiled_clipping(self, backend: str = "inductor") -> None:
+        """Clip the layer-stack weights with one compiled kernel per layer. The per-step
+        clipping is otherwise some fifty small eager kernels."""
+        self._clip_backend = backend
 
     @torch.no_grad()
     def zero_virtual_weights(self) -> None:
