@@ -27,6 +27,9 @@ class PP3Wide(InputFeature):
     def merged_weight(self) -> torch.Tensor:
         return self.weight
 
+    def table_parts(self):
+        return self.weight, None, 0
+
     @torch.no_grad()
     def coalesce(self) -> None:
         pass

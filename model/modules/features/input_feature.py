@@ -17,6 +17,11 @@ class InputFeature(nn.Module, ABC):
     def merged_weight(self) -> torch.Tensor:
         """Return effective weight matrix (with virtual weights merged if applicable)."""
 
+    def table_parts(self) -> tuple[torch.Tensor, torch.Tensor | None, int] | None:
+        """(weight, virtual weight or None, period) when row r of merged_weight() is
+        weight[r] + virtual[r % period]; None when the merged weight has another form."""
+        return None
+
     @abstractmethod
     def coalesce(self) -> None: ...
 

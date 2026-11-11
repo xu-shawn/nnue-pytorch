@@ -5,7 +5,11 @@ from torch import nn
 
 from ...quantize import QuantizationManager
 from ..features.input_feature import InputFeature
-from .double_ft_functions import double_feature_transform
+from .double_ft_functions import (
+    double_feature_transform,
+    prepared_double_feature_transform,
+    prepared_double_feature_transform_available,
+)
 
 
 class ComposedFeatureTransformer(nn.Module):
@@ -115,20 +119,41 @@ class ComposedFeatureTransformer(nn.Module):
         fake_quantize_weights: bool,
         backend: str = "auto",
     ) -> torch.Tensor:
-        merged, bias = self.merged_weight_and_bias(fake_quantize_weights)
         ft_max_act = self.quantization.max_ft_activation
+        scales = self.quantization.weight_scales_dict
+        parts = [f.table_parts() for f in self.features]
 
-        l0_ = double_feature_transform(
-            us,
-            them,
-            white_indices,
-            black_indices,
-            merged,
-            bias,
-            ft_max_act,
-            self.l1_size,
-            backend,
-        )
+        if (
+            backend == "auto"
+            and scales["ft_weight"] == scales["ft_bias"]
+            and prepared_double_feature_transform_available(parts, us, self.l1_size)
+        ):
+            # One pass builds the merged (and fake-quantized) weight table.
+            l0_ = prepared_double_feature_transform(
+                us,
+                them,
+                white_indices,
+                black_indices,
+                parts,
+                self.bias,
+                ft_max_act,
+                self.l1_size,
+                fake_quantize_weights,
+                scales["ft_weight"],
+            )
+        else:
+            merged, bias = self.merged_weight_and_bias(fake_quantize_weights)
+            l0_ = double_feature_transform(
+                us,
+                them,
+                white_indices,
+                black_indices,
+                merged,
+                bias,
+                ft_max_act,
+                self.l1_size,
+                backend,
+            )
 
         if fake_quantize_acts:
             l0_ = self.quantization.fake_quantize_ft_act(l0_)

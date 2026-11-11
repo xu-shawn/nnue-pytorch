@@ -62,6 +62,9 @@ class K32H3(InputFeature):
     def merged_weight(self) -> torch.Tensor:
         return self.weight + self.virtual_weight.repeat(self.NUM_BUCKETS, 1)
 
+    def table_parts(self):
+        return self.weight, self.virtual_weight, self.NUM_PLANES
+
     @torch.no_grad()
     def coalesce(self) -> None:
         self.weight.add_(self.virtual_weight.repeat(self.NUM_BUCKETS, 1))

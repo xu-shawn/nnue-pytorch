@@ -1,7 +1,58 @@
 import torch
 
-from .fused_ft_functions import _HAS_CUPY_KERNELS, FusedDoubleFtFunction
+from .fused_ft_functions import (
+    _HAS_CUPY_KERNELS,
+    FusedDoubleFtFunction,
+    PreparedDoubleFtFunction,
+)
 from .sparse_linear_functions import SparseLinearFunction
+
+
+def prepared_double_feature_transform_available(
+    parts, us: torch.Tensor, l1_size: int
+) -> bool:
+    """Whether the feature transform can run straight from the feature blocks' parameters
+    (`parts` = their table_parts()): NVIDIA GPUs with the CuPy kernels, float32 parameters."""
+    if not (_HAS_CUPY_KERNELS and us.is_cuda and torch.version.hip is None):
+        return False
+    if l1_size % 4 != 0 or any(p is None for p in parts):
+        return False
+    rows = sum(w.shape[0] for w, _, _ in parts)
+    return rows * l1_size < 2**31 and all(
+        w.is_cuda and w.dtype == torch.float32 for w, _, _ in parts
+    )
+
+
+def prepared_double_feature_transform(
+    us: torch.Tensor,
+    them: torch.Tensor,
+    white_indices: torch.Tensor,
+    black_indices: torch.Tensor,
+    parts,
+    bias: torch.Tensor,
+    max_ft_activation: float,
+    l1_size: int,
+    quantize: bool,
+    scale: float,
+) -> torch.Tensor:
+    params = []
+    for weight, virtual, period in parts:
+        params.append(weight)
+        if period:
+            params.append(virtual)
+    return PreparedDoubleFtFunction.apply(
+        us,
+        them,
+        white_indices,
+        black_indices,
+        bias,
+        max_ft_activation,
+        l1_size,
+        quantize,
+        scale,
+        tuple(period for _, _, period in parts),
+        *params,
+    )
 
 
 def double_feature_transform(
