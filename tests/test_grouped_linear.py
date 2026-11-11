@@ -8,7 +8,11 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from model.modules import stacked_linear
-from model.modules.stacked_linear import FactorizedStackedLinear, grouped_l1
+from model.modules.stacked_linear import (
+    FactorizedStackedLinear,
+    StackedLinear,
+    grouped_l1,
+)
 from model.quantize import QuantizationConfig, QuantizationManager
 
 GPU_AVAILABLE = torch.cuda.is_available()
@@ -299,3 +303,56 @@ def test_grouped_fallback_compiles(count, device):
     reference_gradients = torch.autograd.grad(expected.sum(), parameters)
     for grad, ref_grad in zip(gradients, reference_gradients):
         torch.testing.assert_close(grad, ref_grad, atol=3e-5, rtol=3e-4)
+
+
+@pytest.mark.skipif(
+    not OPTIMIZED_AVAILABLE, reason="NVIDIA SM80+, CuPy and Triton required"
+)
+@pytest.mark.parametrize(
+    "width,outputs,key", [(64, 32, "ls_l2"), (128, 1, "ls_output"), (96, 64, "ls_l2")]
+)
+@pytest.mark.parametrize("count", [32, 92, 192])
+@pytest.mark.parametrize("concentrated", [False, True])
+@pytest.mark.parametrize("quantize", [False, True])
+def test_grouped_later_stack_layers(
+    width, outputs, key, count, concentrated, quantize, monkeypatch
+):
+    """The later stack layers (StackedLinear with group factors) match the dense path."""
+    torch.manual_seed(123)
+    layer = StackedLinear(
+        width, outputs, count, QuantizationManager(QuantizationConfig()), key
+    )
+    layer.set_group_factors([torch.arange(count) % 7, torch.arange(count) // 7 % 3])
+    layer = layer.cuda()
+    with torch.no_grad():
+        for p in layer.parameters():
+            p.normal_(std=0.05)
+    # Clipped activations: in [0, 1] with many exact zeros, as the stack layers see.
+    x = torch.rand(4099, width, device="cuda")
+    x.masked_fill_(torch.rand_like(x) < 0.45, 0)
+    x.requires_grad_()
+    indices = torch.randint(0, count, (len(x), 1), device="cuda", dtype=torch.int32)
+    if concentrated:
+        indices[: len(x) * 3 // 4] = count - 1
+    upstream = torch.randn(len(x), outputs, device="cuda")
+    parameters = (x, *layer.parameters())
+    monkeypatch.setenv("NNUE_GROUPED_L1", "0")
+    # The dense reference runs through cuBLAS; keep it in full FP32.
+    allow_tf32 = torch.backends.cuda.matmul.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+    try:
+        expected_output = layer(x, indices, quantize)
+        expected = torch.autograd.grad(expected_output, parameters, upstream)
+    finally:
+        torch.backends.cuda.matmul.allow_tf32 = allow_tf32
+
+    optimized = Mock(wraps=grouped_l1)
+    monkeypatch.setattr(stacked_linear, "grouped_l1", optimized)
+    monkeypatch.setenv("NNUE_GROUPED_L1", "1")
+    actual_output = layer(x, indices, quantize)
+    actual = torch.autograd.grad(actual_output, parameters, upstream)
+    optimized.assert_called_once()
+
+    torch.testing.assert_close(actual_output, expected_output, atol=2e-5, rtol=2e-4)
+    for grad, ref_grad in zip(actual, expected):
+        torch.testing.assert_close(grad, ref_grad, atol=5e-5, rtol=5e-4)
