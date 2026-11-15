@@ -327,21 +327,71 @@ _SCATTER_SRC = (
 // Add a row segment's sum. Zero sums are skipped: grad_weight starts at +0 and a sum of floats never
 // turns it into -0, so adding +-0 changes no bit. With a trained net most are zero (a list's gradient
 // vanishes where its clamp saturates or its pair partner is 0): ~70% of flushes on real batches.
-#define FLUSH(c) do { if (acc[c] != 0.0f) atomicAdd(gw + 32 * (c), acc[c]); } while (0)
-// One block per (tile, column slice). NWARPS warps; lane owns columns col0 + lane + 32*c, c < CPL.
+#define FLUSH(c) do { if (acc[c] != 0.0f) atomicAdd(gw + SCOL(lane + 32 * (c)), acc[c]); } while (0)
+// One block per (tile, column slice). NWARPS warps; lane owns slice columns lane + 32*c, c < CPL.
+// PRO (fused prologue): the block's SLICE columns are HS = SLICE / 2 columns of each half of L1
+// (colh.. and H + colh..), and the tile load computes the lists' gradients from grad_l0 and the
+// forward's clamped values itself instead of reading them from Gw / Gb.
+#define SCOL(x) (PRO ? ((x) < HS ? colh + (x) : H + colh + (x) - HS) : col0 + (x))
 extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
     const float* __restrict__ Gw, const float* __restrict__ Gb, const int32_t* __restrict__ order,
     const int32_t* __restrict__ tile_start, const uint32_t* __restrict__ e_key,
     float* __restrict__ grad_weight, float* __restrict__ grad_bias, const int32_t n_lists, const int32_t batch_size,
-    uint8_t* __restrict__ row_touched)
+    uint8_t* __restrict__ row_touched,
+    const float* __restrict__ grad_l0, const float* __restrict__ clamped, const uint32_t* __restrict__ code,
+    const float max_act)
 {
     const int32_t T = @T@, SLICE = @SLICE@, OUT = @OUT@, CPL = @CPL@, LOCAL_BITS = @LOCAL_BITS@;
+    const int32_t PRO = @PRO@, H = @H@, HS = SLICE / 2;
     extern __shared__ float Gsh[];                          // T * SLICE
     const int32_t tile = blockIdx.x, slice = blockIdx.y;
-    const int32_t col0 = slice * SLICE;
+    const int32_t col0 = slice * SLICE, colh = slice * HS;
 
-    // 1. the tile's gradient rows for this column slice; every thread issues all its loads (PF list ids,
-    // then PF values) before its shared-memory stores
+    // 1. the tile's gradient rows for this column slice; every thread issues all its loads before its
+    // shared-memory stores. Slice column c goes to lane c % 32, slot c / 32.
+    if (PRO) {
+        // code[li] per list in tile order = list id | half << 30 | reference << 31 (tiled_ft_fused).
+        // With us / them = (1, 0) or (0, 1) a list's gradient at columns (i, H + i) is the prologue's
+        // (d0, d1) of the clamped pair its perspective owns (clamped[b][2 half], [2 half + 1]) and of
+        // grad_l0 in that half. Other positions ("reference") read the rows tiled_ft_fused wrote to Gw / Gb.
+        const int NT = @NWARPS@ * 32, NP = T * HS, PF = (NP + NT - 1) / NT;
+        uint32_t cd[PF];
+#pragma unroll
+        for (int k = 0; k < PF; ++k) {
+            const int idx = threadIdx.x + k * NT;
+            const int32_t li = tile * T + idx / HS;
+            cd[k] = (idx < NP && li < n_lists) ? __ldg(&code[li]) : 0xFFFFFFFFu;
+        }
+        float a0[PF], a1[PF], g[PF];
+#pragma unroll
+        for (int k = 0; k < PF; ++k) {
+            const int x = (threadIdx.x + k * NT) % HS;
+            a0[k] = a1[k] = g[k] = 0.0f;
+            if (cd[k] != 0xFFFFFFFFu) {
+                const int32_t lid = (int32_t)(cd[k] & 0x3FFFFFFFu);
+                const bool white = lid < batch_size, ref = (cd[k] >> 31) != 0u;
+                const int64_t b = white ? lid : lid - batch_size;
+                const int32_t half = (int32_t)((cd[k] >> 30) & 1u);
+                const float* src = ref ? (white ? Gw : Gb) + b * OUT : clamped + b * 4 * H + 2 * half * H;
+                a0[k] = __ldg(&src[colh + x]);
+                a1[k] = __ldg(&src[H + colh + x]);
+                if (!ref) g[k] = __ldg(&grad_l0[b * 2 * H + half * H + colh + x]);
+            }
+        }
+#pragma unroll
+        for (int k = 0; k < PF; ++k) {
+            const int idx = threadIdx.x + k * NT, l = idx / HS, x = idx - l * HS;
+            float v0 = a0[k], v1 = a1[k];
+            if (cd[k] != 0xFFFFFFFFu && (cd[k] >> 31) == 0u) {   // same expressions as tiled_ft_prologue
+                v0 = (a0[k] == 0.0f || a0[k] == max_act) ? 0.0f : g[k] * a1[k];
+                v1 = (a1[k] == 0.0f || a1[k] == max_act) ? 0.0f : g[k] * a0[k];
+            }
+            if (idx < NP) {
+                Gsh[l * SLICE + (x & 31) * CPL + (x >> 5)] = v0;
+                Gsh[l * SLICE + ((x + HS) & 31) * CPL + ((x + HS) >> 5)] = v1;
+            }
+        }
+    } else {
     const int NT = @NWARPS@ * 32, PF = (T * SLICE + NT - 1) / NT;
     int32_t lid[PF];
 #pragma unroll
@@ -360,7 +410,8 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
 #pragma unroll
     for (int k = 0; k < PF; ++k) {
         const int idx = threadIdx.x + k * NT, l = idx / SLICE, c = idx - l * SLICE;
-        if (idx < T * SLICE) Gsh[l * SLICE + (c & 31) * CPL + (c >> 5)] = v[k];   // column c at lane (c % 32), slot c / 32
+        if (idx < T * SLICE) Gsh[l * SLICE + (c & 31) * CPL + (c >> 5)] = v[k];
+    }
     }
     __syncthreads();
 
@@ -369,7 +420,7 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
         float s = 0.0f;
         const int pc = (threadIdx.x & 31) * CPL + (threadIdx.x >> 5);
         for (int l = 0; l < T; ++l) s += Gsh[l * SLICE + pc];
-        if (s != 0.0f) atomicAdd(&grad_bias[col0 + threadIdx.x], s);
+        if (s != 0.0f) atomicAdd(&grad_bias[SCOL(threadIdx.x)], s);
     }
 
     // 3. row segments: warp w walks part w of the tile's sorted entry stream
@@ -410,7 +461,7 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
                 if (r != cur) {
                     if (cur != 0xFFFFFFFFu) {
                         if (lane == 0 && slice == 0) row_touched[cur] = 1;
-                        float* gw = grad_weight + (int64_t)cur * OUT + col0 + lane;
+                        float* gw = grad_weight + (int64_t)cur * OUT;
 #pragma unroll
                         for (int c = 0; c < CPL; ++c) { FLUSH(c); acc[c] = 0.0f; }
                     }
@@ -428,7 +479,7 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
             if (r != cur) {
                 if (cur != 0xFFFFFFFFu) {
                     if (lane == 0 && slice == 0) row_touched[cur] = 1;
-                    float* gw = grad_weight + (int64_t)cur * OUT + col0 + lane;
+                    float* gw = grad_weight + (int64_t)cur * OUT;
 #pragma unroll
                     for (int c = 0; c < CPL; ++c) { FLUSH(c); acc[c] = 0.0f; }
                 }
@@ -442,7 +493,7 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
     }
     if (cur != 0xFFFFFFFFu) {
         if (lane == 0 && slice == 0) row_touched[cur] = 1;
-        float* gw = grad_weight + (int64_t)cur * OUT + col0 + lane;
+        float* gw = grad_weight + (int64_t)cur * OUT;
 #pragma unroll
         for (int c = 0; c < CPL; ++c) FLUSH(c);
     }
@@ -457,6 +508,7 @@ def _scatter_kernel(
     l1_size: int,
     out_size: int,
     nwarps: int,
+    pro: bool = False,
 ):
     if (
         slice_cols not in (32, 64, 128)
@@ -482,8 +534,10 @@ def _scatter_kernel(
         LOCAL_BITS=LOCAL_BITS,
         NWARPS=nwarps,
         GV={1: "float", 2: "float2", 4: "float4"}[slice_cols // 32],
+        PRO=1 if pro else 0,
+        H=l1_size // 2,
     )
-    key = ("scatter", T, slice_cols, out_size, nwarps)
+    key = ("scatter", T, slice_cols, l1_size, out_size, nwarps, pro)
     return compile_kernel(key, src, "tiled_scatter", dynamic_shared=shm)
 
 
@@ -794,6 +848,25 @@ def applicable(
 _warned_fallback = False
 
 
+def fallback_prep(
+    white_indices, black_indices, slice_cols: int = COLUMNS_PER_BLOCK
+) -> TiledPrep:
+    """The preparation built in the backward when none was prefetched (warns once)."""
+    global _warned_fallback
+    STATS["fallback"] += 1
+    if not _warned_fallback:
+        _warned_fallback = True
+        warnings.warn(
+            "tiled FT backward: no preparation was prefetched for this batch, so it is built "
+            "in the backward (one host sync per step). Training batches get it from the "
+            "loader's prefetch hook (NNUE.prefetch_hook).",
+            stacklevel=3,
+        )
+    # the fallback tile size must fit the caller's column slice into shared memory
+    T_fb = min(TILE_SIZE, MAX_T, (MAX_SHARED_BYTES // (slice_cols * 4)) // 32 * 32)
+    return prepare(white_indices, black_indices, T=T_fb)
+
+
 @torch.compiler.disable
 def tiled_backward(
     white_indices,
@@ -805,27 +878,21 @@ def tiled_backward(
     prep: TiledPrep | None = None,
     slice_cols: int = COLUMNS_PER_BLOCK,
     nwarps: int = WARPS_PER_BLOCK,
+    pro=None,
 ):
     """Weight/bias gradient of the double sparse linear layer (white and black lists share weight
     and bias); ``grad_w`` / ``grad_b`` (B, OUT) are the output gradients. Columns l1_size.. (the
-    PSQT columns) use plain atomics. Returns (grad_weight, grad_bias)."""
-    global _warned_fallback
+    PSQT columns) use plain atomics. Returns (grad_weight, grad_bias).
+    ``pro`` = (grad_l0, clamped_out, code, max_act): the scatter computes the output gradients of the
+    fused double FT itself (tiled_ft_fused); grad_w / grad_b then only hold the rows of the positions
+    that ``code`` marks as reference."""
     dev = grad_w.device
     B, maxa = white_indices.shape
     OUT = grad_w.shape[1]
     if prep is None:
-        STATS["fallback"] += 1
-        if not _warned_fallback:
-            _warned_fallback = True
-            warnings.warn(
-                "tiled FT backward: no preparation was prefetched for this batch, so it is built "
-                "in the backward (one host sync per step). Training batches get it from the "
-                "loader's prefetch hook (NNUE.prefetch_hook).",
-                stacklevel=2,
-            )
-        # the fallback tile size must fit the caller's column slice into shared memory
-        T_fb = min(TILE_SIZE, MAX_T, (MAX_SHARED_BYTES // (slice_cols * 4)) // 32 * 32)
-        prep = prepare(white_indices, black_indices, T=T_fb)
+        prep = fallback_prep(white_indices, black_indices, slice_cols)
+    if pro is not None and OUT != l1_size:
+        raise ValueError("tiled backward: the fused prologue needs OUT == l1_size")
     n_lists = 2 * B
     if prep.n_lists != n_lists:
         raise RuntimeError("tiled backward: preparation does not match the batch")
@@ -842,7 +909,17 @@ def tiled_backward(
     if OUT > l1_size:
         grad_bias[l1_size:] = grad_w[:, l1_size:].sum(0) + grad_b[:, l1_size:].sum(0)
     with cupy_stream(dev):
-        _scatter_kernel(prep.T, slice_cols, l1_size, OUT, nwarps)(
+        extra = (
+            (
+                pro[0].data_ptr(),
+                pro[1].data_ptr(),
+                pro[2].data_ptr(),
+                np.float32(pro[3]),
+            )
+            if pro is not None
+            else (0, 0, 0, np.float32(0))
+        )
+        _scatter_kernel(prep.T, slice_cols, l1_size, OUT, nwarps, pro is not None)(
             grid=(prep.n_tiles, l1_size // slice_cols),
             block=(32 * nwarps,),
             shared_mem=prep.T * slice_cols * 4 + nwarps * 128,
@@ -857,6 +934,7 @@ def tiled_backward(
                 np.int32(n_lists),
                 np.int32(B),
                 row_touched.data_ptr(),
+                *extra,
             ),
         )
         if OUT > l1_size:

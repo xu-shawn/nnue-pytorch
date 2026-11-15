@@ -7,6 +7,7 @@ import torch
 
 from model.modules.feature_transformer import fused_ft_functions as FF
 from model.modules.feature_transformer import tiled_ft_backward as TB
+from model.modules.feature_transformer import tiled_ft_fused as TFF
 
 pytestmark = pytest.mark.skipif(
     not (
@@ -169,3 +170,36 @@ def test_block_sort_matches_global_sort():
     p2 = TB.prepare(w, b, sort="global")
     assert p1.max_tile > TB.SORT_CAP_MAX
     assert torch.equal(p1.e_key, p2.e_key) and torch.equal(p1.tile_start, p2.tile_start)
+
+
+@pytest.mark.parametrize("seed", [0, 1])
+def test_fused_prologue_matches_reference_bit_for_bit(seed):
+    """The scatter's fused prologue == materializing the accumulator gradients first. One tile (2B <= 256
+    lists): each (row, column) gets at most two atomics (a run split between two warps), and two adds onto
+    +0 commute, so both paths are deterministic."""
+    dev = torch.device("cuda")
+    gen = torch.Generator(device=dev).manual_seed(seed)
+    B, maxa, num_inputs, l1 = 128, 64, 3000, 1024
+    w = _indices(B, maxa, num_inputs, gen, dev)
+    b = _indices(B, maxa, num_inputs, gen, dev)
+    W = (
+        torch.randn(num_inputs, l1, generator=gen, device=dev) * 0.05 * 64
+    ).round() / 64
+    W[torch.rand(num_inputs, l1, generator=gen, device=dev) < 0.3] = -0.0
+    bias = torch.rand(l1, generator=gen, device=dev)
+    us = (torch.rand(B, 1, generator=gen, device=dev) < 0.5).float()
+    them = 1.0 - us
+    us[3], them[3] = 0.5, 0.5  # non-binary positions take the reference rows
+    us[5], them[5] = 1.0, 1.0
+    clamped = _clamped_fp32(us, them, w, b, W, bias, l1)
+    g = torch.randn(B, l1, generator=gen, device=dev)
+    prep = TB.prepare(w, b)
+    assert prep.n_tiles == 1
+    out = [
+        TFF.backward(
+            us, them, w, b, g, clamped, num_inputs, MAX_ACT, l1, prep=prep, fused=f
+        )
+        for f in (True, False)
+    ]
+    assert torch.equal(out[0][0], out[1][0]) and torch.equal(out[0][1], out[1][1])
+    assert out[0][0].abs().sum() > 0
