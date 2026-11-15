@@ -324,6 +324,10 @@ _SCATTER_SRC = (
     _HDR
     + r"""
 #define GV @GV@
+// Add a row segment's sum. Zero sums are skipped: grad_weight starts at +0 and a sum of floats never
+// turns it into -0, so adding +-0 changes no bit. With a trained net most are zero (a list's gradient
+// vanishes where its clamp saturates or its pair partner is 0): ~70% of flushes on real batches.
+#define FLUSH(c) do { if (acc[c] != 0.0f) atomicAdd(gw + 32 * (c), acc[c]); } while (0)
 // One block per (tile, column slice). NWARPS warps; lane owns columns col0 + lane + 32*c, c < CPL.
 extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
     const float* __restrict__ Gw, const float* __restrict__ Gb, const int32_t* __restrict__ order,
@@ -408,7 +412,7 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
                         if (lane == 0 && slice == 0) row_touched[cur] = 1;
                         float* gw = grad_weight + (int64_t)cur * OUT + col0 + lane;
 #pragma unroll
-                        for (int c = 0; c < CPL; ++c) { atomicAdd(gw + 32 * c, acc[c]); acc[c] = 0.0f; }
+                        for (int c = 0; c < CPL; ++c) { FLUSH(c); acc[c] = 0.0f; }
                     }
                     cur = r;
                 }
@@ -426,7 +430,7 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
                     if (lane == 0 && slice == 0) row_touched[cur] = 1;
                     float* gw = grad_weight + (int64_t)cur * OUT + col0 + lane;
 #pragma unroll
-                    for (int c = 0; c < CPL; ++c) { atomicAdd(gw + 32 * c, acc[c]); acc[c] = 0.0f; }
+                    for (int c = 0; c < CPL; ++c) { FLUSH(c); acc[c] = 0.0f; }
                 }
                 cur = r;
             }
@@ -440,7 +444,7 @@ extern "C" __global__ void __launch_bounds__(@NWARPS@ * 32) tiled_scatter(
         if (lane == 0 && slice == 0) row_touched[cur] = 1;
         float* gw = grad_weight + (int64_t)cur * OUT + col0 + lane;
 #pragma unroll
-        for (int c = 0; c < CPL; ++c) atomicAdd(gw + 32 * c, acc[c]);
+        for (int c = 0; c < CPL; ++c) FLUSH(c);
     }
 }
 """
