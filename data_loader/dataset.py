@@ -346,9 +346,9 @@ class FixedNumBatchesDataset(Dataset):
         prefetch_hook=None,
     ):
         """``prefetch_hook(batch)``, when given, runs on the prefetch thread for every batch copied
-        to a CUDA ``device``, on the prefetch stream, before the batch is handed out: index-only work
-        the model can do ahead of the step (see NNUE.prefetch_hook). It must not modify the batch;
-        if it raises, a warning reports the error and the hook is no longer called."""
+        to a CUDA ``device``, on the prefetch stream, and returns the batch to hand out: index-only
+        work the model can do ahead of the step (see NNUE.prefetch_hook). If it raises, a warning
+        reports the error, the batch is handed out as it was, and the hook is no longer called."""
         super().__init__()
         self.dataset = dataset
         self.iter = None  # Deferred to _start_prefetching
@@ -409,7 +409,7 @@ class FixedNumBatchesDataset(Dataset):
                             )
                             if prefetch_hook is not None:
                                 try:
-                                    prefetch_hook(item)
+                                    item = prefetch_hook(item)
                                 except Exception as e:  # noqa: BLE001 - the hook is optional work
                                     warnings.warn(
                                         "data loader: the prefetch hook failed and is disabled "

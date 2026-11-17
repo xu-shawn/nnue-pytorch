@@ -96,6 +96,23 @@ class ComposedFeatureTransformer(nn.Module):
         first_row = self.NUM_INPUTS - last.NUM_INPUTS
         return first_row, last.NUM_INPUTS // last.NUM_BUCKETS
 
+    def locality_order(
+        self, white_indices: torch.Tensor, black_indices: torch.Tensor
+    ) -> torch.Tensor | None:
+        """Permutation of a batch's positions that puts positions with the same buckets (white's,
+        then black's) next to each other, or None when the last feature has no buckets.
+
+        The forward gathers one weight row per active feature, one block per position. Neighbours
+        with the same bucket read the same block of rows, which the GPU then still has cached. The
+        order of a batch carries no meaning, so reordering it changes no position's output."""
+        buckets = self.list_buckets()
+        if buckets is None:
+            return None
+        first_row, rows_per_bucket = buckets
+        white = (white_indices.max(dim=1).values - first_row) // rows_per_bucket
+        black = (black_indices.max(dim=1).values - first_row) // rows_per_bucket
+        return torch.argsort(white * self.features[-1].NUM_BUCKETS + black)
+
     def prefetch_preparer(self):
         """``prepare(white_indices, black_indices)`` for the loader to run on training batches once
         they are on the GPU, or None when the tiled backward does not handle this layer: it builds
