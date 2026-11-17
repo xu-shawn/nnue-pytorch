@@ -11,6 +11,7 @@ from .input_feature import InputFeature
 from .k32h3 import K32H3
 from .knight_blockade import KnightBlockade
 from .knight_mob_cover import KnightMobCover
+from .knight_pawn import BishopDomination, KnightBehind, KnightPawn
 from .pp_3wide import PP3Wide
 
 _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
@@ -20,6 +21,9 @@ _FEATURE_COMPONENTS: dict[str, type[InputFeature]] = {
     "Knight_MobCover": KnightMobCover,
     "Knight_Blockade": KnightBlockade,
     "Bishop_Triangle": BishopTriangle,
+    "Knight_Pawn": KnightPawn,
+    "Knight_Behind": KnightBehind,
+    "Bishop_Domination": BishopDomination,
 }
 
 DEFAULT_FEATURES = "Full_Threats+PP_3Wide+K32H3^"

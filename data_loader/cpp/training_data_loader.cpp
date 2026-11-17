@@ -372,7 +372,7 @@ struct PP_3Wide {
 struct KnightMobCover {
     static constexpr std::string_view NAME                = "Knight_MobCover";
     static constexpr int              INPUTS              = 2 * 64 * 48;
-    static constexpr int              MAX_ACTIVE_FEATURES = 64;
+    static constexpr int              MAX_ACTIVE_FEATURES = 32;
 
     static std::pair<int, int>
     fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
@@ -520,6 +520,87 @@ struct ComposedFeatureExtractor: IFeatureExtractor {
     }
 };
 
+// Knight x pawn cells: one row per pawn and knight standing in one of eleven places relative to that pawn. Files are
+// compared in the oriented frame, ranks along the pawn's direction of travel. A knight of the pawn's side right behind it
+// (slot 0), or on its rank one, two or three files to the lower / higher file (slots 1-6); an enemy knight one file aside
+// and three ranks ahead of the pawn (7, 8) or one rank behind it (9, 10). Index: (pawn colour rel. the perspective * 48 +
+// oriented pawn square - 8) * 11 + slot. SlotZeroOnly (Knight_Behind) keeps slot 0 alone, index without the * 11.
+template<bool SlotZeroOnly>
+struct KnightPawnT {
+    static constexpr std::string_view NAME                = SlotZeroOnly ? "Knight_Behind" : "Knight_Pawn";
+    static constexpr int              INPUTS              = SlotZeroOnly ? 96 : 96 * 11;
+    static constexpr int              MAX_ACTIVE_FEATURES = SlotZeroOnly ? 16 : 32;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&     pos    = e.pos;
+        const int orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+        static constexpr int Own[7][2]   = {{0, -1}, {-1, 0}, {1, 0}, {-2, 0}, {2, 0}, {-3, 0}, {3, 0}};
+        static constexpr int Enemy[4][2] = {{-1, 3}, {1, 3}, {-1, -1}, {1, -1}};
+        int k = 0;
+        for (Color c : {Color::White, Color::Black})
+        {
+            const Bitboard knights[2] = {pos.piecesBB(Piece(PieceType::Knight, c)),
+                                         pos.piecesBB(Piece(PieceType::Knight, !c))};
+            const int      dr         = c == Color::White ? 1 : -1;
+            for (Square p : pos.piecesBB(Piece(PieceType::Pawn, c)))
+            {
+                const int pi = static_cast<int>(p), pf = pi & 7, pr = pi >> 3, op = pi ^ orient;
+                const int id = (static_cast<int>(c) ^ static_cast<int>(color)) * 48 + op - 8;
+                auto      at = [&](const int o[2], const Bitboard& bb, int& dx) {
+                    const int f = pf + o[0], r = pr + dr * o[1];
+                    if (f < 0 || f > 7 || r < 0 || r > 7 || !(bb & Bitboard::square(Square(r * 8 + f))).bits())
+                        return false;
+                    dx = (((r * 8 + f) ^ orient) & 7) - (op & 7);
+                    return true;
+                };
+                int dx = 0;
+                for (int i = 0; i < (SlotZeroOnly ? 1 : 7); ++i)
+                    if (at(Own[i], knights[0], dx) && k < MAX_ACTIVE_FEATURES)
+                        features[k++] = SlotZeroOnly ? id
+                                                     : id * 11 + (i == 0 ? 0 : (dx < 0 ? 1 : 2) + 2 * (std::abs(dx) - 1));
+                if (!SlotZeroOnly)
+                    for (int i = 0; i < 4; ++i)
+                        if (at(Enemy[i], knights[1], dx) && k < MAX_ACTIVE_FEATURES)
+                            features[k++] = id * 11 + (Enemy[i][1] == 3 ? 7 : 9) + (dx > 0);
+            }
+        }
+        return {k, INPUTS};
+    }
+};
+using KnightPawn   = KnightPawnT<false>;
+using KnightBehind = KnightPawnT<true>;
+
+// Knights with an enemy bishop three ranks ahead on their file, ahead being the direction the knight's side moves: the
+// bishop takes four of the knight's forward squares. Index: knight colour rel. the perspective * 64 + oriented knight
+// square.
+struct BishopDomination {
+    static constexpr std::string_view NAME                = "Bishop_Domination";
+    static constexpr int              INPUTS              = 2 * 64;
+    static constexpr int              MAX_ACTIVE_FEATURES = 16;
+
+    static std::pair<int, int>
+    fill_features_sparse(const TrainingDataEntry& e, int* features, Color color) {
+        auto&     pos    = e.pos;
+        const int orient = static_cast<int>(
+          FullThreats::OrientTBL[static_cast<int>(color)][static_cast<int>(pos.kingSquare(color))]);
+        int k = 0;
+        for (Color c : {Color::White, Color::Black})
+        {
+            const Bitboard bishops = pos.piecesBB(Piece(PieceType::Bishop, !c));
+            for (Square s : pos.piecesBB(Piece(PieceType::Knight, c)))
+            {
+                const int t = static_cast<int>(s) + (c == Color::White ? 24 : -24);
+                if (t < 0 || t > 63 || !(bishops & Bitboard::square(Square(t))).bits() || k == MAX_ACTIVE_FEATURES)
+                    continue;
+                features[k++] = (static_cast<int>(c) ^ static_cast<int>(color)) * 64 + (static_cast<int>(s) ^ orient);
+            }
+        }
+        return {k, INPUTS};
+    }
+};
+
 template<typename T>
 struct SimpleExtractor: IFeatureExtractor {
     int inputs() const override { return T::INPUTS; }
@@ -541,6 +622,12 @@ static std::unique_ptr<IFeatureExtractor> make_single_extractor(std::string_view
         return std::make_unique<SimpleExtractor<KnightBlockade>>();
     if (name == "Bishop_Triangle")
         return std::make_unique<SimpleExtractor<BishopTriangle>>();
+    if (name == "Knight_Pawn")
+        return std::make_unique<SimpleExtractor<KnightPawn>>();
+    if (name == "Knight_Behind")
+        return std::make_unique<SimpleExtractor<KnightBehind>>();
+    if (name == "Bishop_Domination")
+        return std::make_unique<SimpleExtractor<BishopDomination>>();
     if (name == "K32H3")
         return std::make_unique<SimpleExtractor<K32H3>>();
     return nullptr;
