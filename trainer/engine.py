@@ -104,6 +104,7 @@ class SimpleTrainer:
         world_size: int,
         local_rank: int,
         checkpoint_writer: Any | None = None,
+        schedule_stretch: float = 1.0,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -137,6 +138,11 @@ class SimpleTrainer:
 
         self.current_epoch: int = 0
         self.global_step: int = 0
+        # Position in the learning-rate and lambda schedules. It advances by
+        # 1/schedule_stretch per optimizer step, so it equals global_step
+        # unless the schedules are stretched.
+        self.schedule_stretch = schedule_stretch
+        self.schedule_step: float = 0.0
         self.num_training_batches: int | None = None
         self.num_val_batches: int | None = None
         self.callback_metrics: dict = {}
@@ -218,14 +224,16 @@ class SimpleTrainer:
                 self.model.config.use_fake_weight_quantization and quantize,
             )
             loss = _unwrap_module(self.model).compute_loss_with_scorenet(
-                scorenet, batch, self.global_step
+                scorenet, batch, int(self.schedule_step)
             )
             _unwrap_module(self.model).loss_metrics["train_loss_epoch"].update(
                 loss.detach()
             )
             outputs = {"loss": loss, "train_loss": loss.detach()}
         else:
-            outputs = self.model.train_step(batch, self.current_epoch, self.global_step)
+            outputs = self.model.train_step(
+                batch, self.current_epoch, int(self.schedule_step)
+            )
         return outputs
 
     # ------------------------------------------------------------------
@@ -244,6 +252,7 @@ class SimpleTrainer:
         checkpoint = {
             "epoch": self.current_epoch,
             "global_step": self.global_step,
+            "schedule_step": self.schedule_step,
             "state_dict": unwrapped.state_dict(),
             "lr_schedulers": [sch.state_dict() for sch in self._schedulers],
         }
@@ -280,6 +289,7 @@ class SimpleTrainer:
         unwrapped.load_state_dict(checkpoint["state_dict"])
         self.current_epoch = checkpoint.get("epoch", 0)
         self.global_step = checkpoint.get("global_step", 0)
+        self.schedule_step = checkpoint.get("schedule_step", float(self.global_step))
 
         # Restore scheduler states if they were saved.
         scheduler_states = checkpoint.get("lr_schedulers", [])
@@ -347,10 +357,14 @@ class SimpleTrainer:
 
             self.optimizer.step()
 
-            # Step OneCycleLR-style schedulers every optimizer step.
-            for sch in self._schedulers:
-                if is_one_cycle(sch):
-                    sch.step()
+            # Step OneCycleLR-style schedulers once per schedule step: every
+            # optimizer step unless the schedules are stretched.
+            previous = int(self.schedule_step)
+            self.schedule_step += 1.0 / self.schedule_stretch
+            for _ in range(int(self.schedule_step) - previous):
+                for sch in self._schedulers:
+                    if is_one_cycle(sch):
+                        sch.step()
 
             self.global_step += 1
 
@@ -431,7 +445,7 @@ class SimpleTrainer:
                 )
 
                 outputs = self.model.val_step(
-                    batch, self.current_epoch, self.global_step
+                    batch, self.current_epoch, int(self.schedule_step)
                 )
                 # Accumulate on the device: a per-batch float() would force a
                 # GPU-to-CPU sync in every iteration.

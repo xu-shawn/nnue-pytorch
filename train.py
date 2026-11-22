@@ -453,6 +453,7 @@ def main():
         world_size=world_size,
         local_rank=local_rank,
         checkpoint_writer=checkpoint_writer,
+        schedule_stretch=args.schedule_stretch,
     )
 
     if actual_threads > 0:

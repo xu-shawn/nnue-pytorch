@@ -27,6 +27,9 @@ class TrainingConfig:
     check_val_every_n_epoch: int = 1
     """Number of epochs between validation (has to be >= 1)."""
 
+    schedule_stretch: float = 1.0
+    """The learning-rate and lambda schedules advance 1/schedule_stretch steps per optimizer step (>= 1). On a resumed run the rest of the schedule then takes that many times as many steps."""
+
     default_root_dir: str | None = None
     """Default root directory for logs and checkpoints. Default: None (use current directory)."""
 
@@ -123,6 +126,10 @@ class TrainingConfig:
             raise ValueError(
                 "check_val_every_n_epoch has to be >= 1, "
                 f"got {self.check_val_every_n_epoch}."
+            )
+        if self.schedule_stretch < 1.0:
+            raise ValueError(
+                f"schedule_stretch has to be >= 1, got {self.schedule_stretch}."
             )
 
 
