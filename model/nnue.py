@@ -81,7 +81,27 @@ def calculate_sf_loss(scorenet, score, outcome, loss_params, actual_lambda):
     )
     loss = (loss * weights).sum() / weights.sum()
 
+    if loss_params.group_weight != 0.0:
+        loss = loss + loss_params.group_weight * group_loss(qf, pf, outcome)
+
     return loss
+
+
+def group_loss(qf, pf, outcome):
+    """Error of each position of a sibling group relative to its group's mean, summed
+    over the batch's group positions and divided by the batch size. Groups are runs of
+    rows: outcome 3 starts one, outcome 4 continues it (a run that begins the batch
+    without a start is the tail of a group cut by the batch boundary)."""
+    member = (outcome > 2.5).to(qf.dtype)
+    group = torch.cumsum((outcome == 3.0).to(torch.long), 0).view(-1)
+    size = torch.zeros_like(qf).view(-1).index_add(0, group, member.view(-1))
+    mean_q = torch.zeros_like(qf).view(-1).index_add(0, group, (qf * member).view(-1))
+    mean_p = torch.zeros_like(pf).view(-1).index_add(0, group, (pf * member).view(-1))
+    size = size.clamp(min=1.0)
+    centred = (qf.view(-1) - (mean_q / size)[group]) - (
+        pf.view(-1) - (mean_p / size)[group]
+    )
+    return (centred * centred * member.view(-1)).sum() / qf.numel()
 
 
 class NNUE(nn.Module):

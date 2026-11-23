@@ -639,7 +639,11 @@ SparseBatch::~SparseBatch() {
 void SparseBatch::fill_entry(const IFeatureExtractor& fs, int i, const TrainingDataEntry& e) {
     is_white[i] = static_cast<float>(e.pos.sideToMove() == Color::White);
     // Search-tree samples have no result: outcome 2 makes the loss use the score alone.
-    outcome[i]  = e.ply == TREE_SAMPLE_PLY ? 2.0f : (e.result + 1.0f) / 2.0f;
+    // Sibling groups likewise: outcome 3 for the first position of a group, 4 for the others.
+    outcome[i]  = e.ply == TREE_SAMPLE_PLY ? 2.0f
+                : e.ply == kGroupFirstPly  ? 3.0f
+                : e.ply == kGroupMemberPly ? 4.0f
+                                           : (e.result + 1.0f) / 2.0f;
     score[i]    = e.score;
     fill_features(fs, i, e);
 }
@@ -1043,8 +1047,11 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
     const uint64_t tree_sample_skip_threshold = static_cast<uint64_t>(
       (1.0 - std::clamp(config.tree_sample_accept, 0.0, 1.0)) * static_cast<double>(~0ULL));
+    const uint64_t group_skip_threshold = static_cast<uint64_t>(
+      (1.0 - std::clamp(config.group_sample_accept, 0.0, 1.0)) * static_cast<double>(~0ULL));
 
-    return [config, random_skip_threshold, tree_sample_skip_threshold, target_pc_weights_lut,
+    return [config, random_skip_threshold, tree_sample_skip_threshold, group_skip_threshold,
+            target_pc_weights_lut,
             target_pc_weights_total,
             early_ply_accept_prob = std::move(early_ply_accept_prob)](const TrainingDataEntry& e) {
         static constexpr int    VALUE_NONE = 32002;
@@ -1052,6 +1059,15 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
         if (e.ply == TREE_SAMPLE_PLY)
             return e.score == VALUE_NONE
                 || rng::get_thread_local_rng()() < tree_sample_skip_threshold;
+
+        // A sibling group is kept or dropped as a whole, decided at its first entry.
+        if (e.ply == kGroupFirstPly || e.ply == kGroupMemberPly)
+        {
+            static thread_local bool keep_group = true;
+            if (e.ply == kGroupFirstPly)
+                keep_group = rng::get_thread_local_rng()() >= group_skip_threshold;
+            return !keep_group;
+        }
 
         static thread_local int last_ply   = -1;
         static thread_local int last_score = VALUE_NONE;

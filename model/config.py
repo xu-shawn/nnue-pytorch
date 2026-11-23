@@ -112,6 +112,8 @@ class LossParams:
     """weight boost parameter 1 (default=0.0)"""
     w2: float = 0.5
     """weight boost parameter 2 (default=0.5)"""
+    group_weight: float = 0.0
+    """Weight of the within-group error of sibling groups (default=0.0)"""
     tb_remap_base: float = 4000.0
     """Tablebase score remapping base value (default=7000.0)"""
     tb_remap_scale: float = 4000.0

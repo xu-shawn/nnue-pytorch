@@ -156,6 +156,48 @@ namespace binpack
 {
     using namespace std::literals;
 
+    // Sibling groups: positions meant to be compared with each other, stored
+    // one after another. The first entry of a group carries kGroupFirstPly,
+    // the others kGroupMemberPly.
+    inline constexpr std::uint16_t kGroupMemberPly = 8000;
+    inline constexpr std::uint16_t kGroupFirstPly  = 8001;
+
+    // Shuffles a window, moving each sibling group as one unit so that its
+    // entries stay next to each other.
+    template<typename Rng>
+    inline void shuffle_keeping_groups(std::vector<TrainingDataEntry>& entries, Rng& prng)
+    {
+        const bool anyGroup =
+          std::any_of(entries.begin(), entries.end(), [](const TrainingDataEntry& e) {
+              return e.ply == kGroupFirstPly || e.ply == kGroupMemberPly;
+          });
+        if (!anyGroup)
+        {
+            std::shuffle(entries.begin(), entries.end(), prng);
+            return;
+        }
+
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> units;
+        units.reserve(entries.size());
+        for (std::size_t i = 0; i < entries.size();)
+        {
+            std::size_t j = i + 1;
+            if (entries[i].ply == kGroupFirstPly)
+                while (j < entries.size() && entries[j].ply == kGroupMemberPly)
+                    ++j;
+            units.emplace_back(static_cast<std::uint32_t>(i), static_cast<std::uint32_t>(j - i));
+            i = j;
+        }
+        std::shuffle(units.begin(), units.end(), prng);
+
+        std::vector<TrainingDataEntry> out;
+        out.reserve(entries.size());
+        for (const auto& [start, count] : units)
+            for (std::uint32_t k = 0; k < count; ++k)
+                out.push_back(std::move(entries[start + k]));
+        entries.swap(out);
+    }
+
     // Shared shuffle window pool.
     //
     // Decode workers cooperatively fill ONE open window with filtered
@@ -204,6 +246,10 @@ namespace binpack
                     }
                     const std::size_t space = m_capacity - m_open->entries.size();
                     const std::size_t n = std::min(space, scratch.size() - offset);
+                    // The rest of a sibling group cut by the window boundary
+                    // starts a group of its own.
+                    if (scratch[offset].ply == kGroupMemberPly)
+                        scratch[offset].ply = kGroupFirstPly;
                     m_open->entries.insert(
                         m_open->entries.end(),
                         std::make_move_iterator(scratch.begin() + offset),
@@ -221,7 +267,7 @@ namespace binpack
                 if (sealed != nullptr)
                 {
                     auto& prng = rng::get_thread_local_rng();
-                    std::shuffle(sealed->entries.begin(), sealed->entries.end(), prng);
+                    shuffle_keeping_groups(sealed->entries, prng);
                     {
                         std::lock_guard lock(m_mutex);
                         m_ready.push_back(sealed);
@@ -277,7 +323,7 @@ namespace binpack
             if (sealed != nullptr)
             {
                 auto& prng = rng::get_thread_local_rng();
-                std::shuffle(sealed->entries.begin(), sealed->entries.end(), prng);
+                shuffle_keeping_groups(sealed->entries, prng);
                 {
                     std::lock_guard lock(m_mutex);
                     m_ready.push_back(sealed);
@@ -725,33 +771,43 @@ namespace binpack
                 } workerExit{this};
 
                 bool isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
+                bool inGroup = false; // the previous entry of this chunk was part of a sibling group
 
                 while(!isEnd && !m_stopFlag.load())
                 {
-                    const auto e = m_chunkReader.next(m_chunk);
+                    auto e = m_chunkReader.next(m_chunk);
                     if (m_counter) ++preskip_count;
+
+                    // The rest of a sibling group that began in the previous
+                    // chunk starts a group of its own.
+                    if (e.ply == kGroupMemberPly && !inGroup)
+                        e.ply = kGroupFirstPly;
+                    inGroup = e.ply == kGroupFirstPly || e.ply == kGroupMemberPly;
 
                     if (!m_chunkReader.hasNext(m_chunk))
                     {
                         isEnd = fetchNextChunkFromSharedQueue(m_chunkReader, m_chunk);
+                        inGroup = false;
                     }
 
                     if (!m_skipPredicate || !m_skipPredicate(e))
                     {
-                        scratch.emplace_back(e);
-                        if (m_counter)
-                        {
-                            keyBuffer.push_back(nnue::hash::hash(e.pos));
-                            if (keyBuffer.size() >= keyFlushThreshold)
-                                flushAll();
-                        }
-                        if (scratch.size() >= kWorkerScratchEntries)
+                        // Hand the scratch over only between sibling groups,
+                        // so a group is not split by another worker's entries.
+                        if (scratch.size() >= kWorkerScratchEntries && e.ply != kGroupMemberPly)
                         {
                             if (!m_pool->append(scratch))
                             {
                                 flushAll();
                                 return; // stopped
                             }
+                        }
+                        scratch.emplace_back(e);
+                        if (m_counter)
+                        {
+                            keyBuffer.push_back(nnue::hash::hash(e.pos));
+                            if (keyBuffer.size() >= keyFlushThreshold)
+                                flushAll();
                         }
                     }
                 }
