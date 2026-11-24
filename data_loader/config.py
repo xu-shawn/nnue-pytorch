@@ -53,6 +53,10 @@ class DataloaderSkipConfig:
     """Positions whose |score| is at least this are kept with probability `decided_accept`. 0 = disabled."""
     decided_accept: float = 0.3
     """Acceptance probability for positions at or above `decided_score`."""
+    tree_decided_score: int = 0
+    """Search-tree samples whose |score| is at least this are kept with probability `tree_decided_accept`. 0 = disabled."""
+    tree_decided_accept: float = 1.0
+    """Acceptance probability for search-tree samples at or above `tree_decided_score`."""
 
 
 @dataclass
@@ -136,6 +140,8 @@ class CDataloaderSkipConfig(ctypes.Structure):
         ("tree_sample_accept", ctypes.c_double),
         ("decided_score", ctypes.c_int),
         ("decided_accept", ctypes.c_double),
+        ("tree_decided_score", ctypes.c_int),
+        ("tree_decided_accept", ctypes.c_double),
     ]
 
     def __init__(self, config: DataloaderSkipConfig):
@@ -163,6 +169,8 @@ class CDataloaderSkipConfig(ctypes.Structure):
             tree_sample_accept=config.tree_sample_accept,
             decided_score=config.decided_score,
             decided_accept=config.decided_accept,
+            tree_decided_score=config.tree_decided_score,
+            tree_decided_accept=config.tree_decided_accept,
         )
 
 
