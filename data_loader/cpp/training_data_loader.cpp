@@ -1096,9 +1096,22 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
                 return true;
         }
 
-        if (config.decided_score > 0 && std::abs(e.score) >= config.decided_score
-            && prng() < decided_skip_threshold)
-            return true;
+        if (config.decided_score > 0)
+        {
+            const int abs_score = std::abs(e.score);
+            if (abs_score >= config.decided_score)
+            {
+                if (prng() < decided_skip_threshold)
+                    return true;
+            }
+            else if (config.decided_ramp_from > 0 && abs_score > config.decided_ramp_from)
+            {
+                const double t = double(abs_score - config.decided_ramp_from)
+                               / double(config.decided_score - config.decided_ramp_from);
+                if (prng() < static_cast<uint64_t>(t * static_cast<double>(decided_skip_threshold)))
+                    return true;
+            }
+        }
 
         if (config.simple_eval_skipping > 0
             && std::abs(e.pos.simple_eval()) < config.simple_eval_skipping)

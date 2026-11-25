@@ -16,6 +16,7 @@ struct DataloaderSkipConfig {
     double tree_sample_accept;
     int    decided_score;
     double decided_accept;
+    int    decided_ramp_from;
 };
 
 struct DataloaderDDPConfig {

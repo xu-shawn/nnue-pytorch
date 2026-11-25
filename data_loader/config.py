@@ -53,6 +53,8 @@ class DataloaderSkipConfig:
     """Positions whose |score| is at least this are kept with probability `decided_accept`. 0 = disabled."""
     decided_accept: float = 1.0
     """Acceptance probability for positions at or above `decided_score`."""
+    decided_ramp_from: int = 0
+    """If > 0, the acceptance probability falls linearly from 1 at this |score| to `decided_accept` at `decided_score`."""
 
 
 @dataclass
@@ -136,6 +138,7 @@ class CDataloaderSkipConfig(ctypes.Structure):
         ("tree_sample_accept", ctypes.c_double),
         ("decided_score", ctypes.c_int),
         ("decided_accept", ctypes.c_double),
+        ("decided_ramp_from", ctypes.c_int),
     ]
 
     def __init__(self, config: DataloaderSkipConfig):
@@ -163,6 +166,7 @@ class CDataloaderSkipConfig(ctypes.Structure):
             tree_sample_accept=config.tree_sample_accept,
             decided_score=config.decided_score,
             decided_accept=config.decided_accept,
+            decided_ramp_from=config.decided_ramp_from,
         )
 
 
