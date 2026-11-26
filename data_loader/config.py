@@ -53,6 +53,10 @@ class DataloaderSkipConfig:
     """Positions whose |score| is at least this are kept with probability `decided_accept`. 0 = disabled."""
     decided_accept: float = 0.3
     """Acceptance probability for positions at or above `decided_score`."""
+    draw_score: int = -1
+    """Positions of drawn games whose |score| is at most this are kept with probability `draw_accept`. -1 = disabled."""
+    draw_accept: float = 1.0
+    """Acceptance probability for drawn-game positions at or below `draw_score`."""
 
 
 @dataclass
@@ -136,6 +140,8 @@ class CDataloaderSkipConfig(ctypes.Structure):
         ("tree_sample_accept", ctypes.c_double),
         ("decided_score", ctypes.c_int),
         ("decided_accept", ctypes.c_double),
+        ("draw_score", ctypes.c_int),
+        ("draw_accept", ctypes.c_double),
     ]
 
     def __init__(self, config: DataloaderSkipConfig):
@@ -163,6 +169,8 @@ class CDataloaderSkipConfig(ctypes.Structure):
             tree_sample_accept=config.tree_sample_accept,
             decided_score=config.decided_score,
             decided_accept=config.decided_accept,
+            draw_score=config.draw_score,
+            draw_accept=config.draw_accept,
         )
 
 

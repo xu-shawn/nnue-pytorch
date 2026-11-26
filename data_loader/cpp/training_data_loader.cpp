@@ -914,7 +914,7 @@ FenBatch* FenBatchStream::next() {
 std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkipConfig config) {
     if (!config.filtered && !config.wld_filtered && config.random_fen_skipping <= 0
         && config.early_fen_skipping < 0 && config.soft_early_fen_skipping <= 0
-        && config.decided_score <= 0)
+        && config.decided_score <= 0 && config.draw_score < 0)
     {
         return nullptr;
     }
@@ -1029,9 +1029,11 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
       (1.0 - std::clamp(config.tree_sample_accept, 0.0, 1.0)) * static_cast<double>(~0ULL));
     const uint64_t decided_skip_threshold = static_cast<uint64_t>(
       (1.0 - std::clamp(config.decided_accept, 0.0, 1.0)) * static_cast<double>(~0ULL));
+    const uint64_t draw_skip_threshold = static_cast<uint64_t>(
+      (1.0 - std::clamp(config.draw_accept, 0.0, 1.0)) * static_cast<double>(~0ULL));
 
     return [config, random_skip_threshold, tree_sample_skip_threshold, decided_skip_threshold,
-            target_pc_weights_lut, target_pc_weights_total,
+            draw_skip_threshold, target_pc_weights_lut, target_pc_weights_total,
             early_ply_accept_prob = std::move(early_ply_accept_prob)](const TrainingDataEntry& e) {
         static constexpr int    VALUE_NONE = 32002;
 
@@ -1081,6 +1083,10 @@ std::function<bool(const TrainingDataEntry&)> make_skip_predicate(DataloaderSkip
 
         if (config.decided_score > 0 && std::abs(e.score) >= config.decided_score
             && prng() < decided_skip_threshold)
+            return true;
+
+        if (config.draw_score >= 0 && e.result == 0 && std::abs(e.score) <= config.draw_score
+            && prng() < draw_skip_threshold)
             return true;
 
         if (config.simple_eval_skipping > 0
